@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] 桌面发布打包改用冻结可执行文件运行时探针校验 `alphasift.dsa_adapter`，避免 macOS PyInstaller 将模块内嵌进可执行文件时被文件系统/zip 扫描误判为缺失。
 - [改进] 新增默认关闭的 A 股情报扩展门禁、能力探测端点和配置占位，关闭时不导入 `astock_data` 或改变现有分析链路。
 - [改进] A 股情报扩展新增 lazy `astock_data` provider adapter、结构化状态 schema 和内存/文件缓存 manager，区分 `empty`、`stale` 与 provider unavailable。
+- [改进] A 股情报扩展新增 DB snapshot 表与 repository，用唯一快照槽位保存 `payload_json`、`source_hash`、`config_hash`、`coverage_ratio` 和 revision。
 
 ## [3.21.0] - 2026-06-07
 

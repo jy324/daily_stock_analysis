@@ -9,11 +9,13 @@
 """
 
 from src.repositories.analysis_repo import AnalysisRepository
+from src.repositories.ashare_snapshot_repo import AShareSnapshotRepository
 from src.repositories.backtest_repo import BacktestRepository
 from src.repositories.stock_repo import StockRepository
 
 __all__ = [
     "AnalysisRepository",
+    "AShareSnapshotRepository",
     "BacktestRepository",
     "StockRepository",
 ]

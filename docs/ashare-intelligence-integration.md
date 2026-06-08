@@ -36,8 +36,12 @@ A 股情报路由默认注册，但运行时门禁：
 
 DSA 顶层不直接 import `astock_data`。provider factory 通过 `import_module("astock_data")` 延迟导入，且 route、tool、service import 阶段不得创建 client 或访问外部网络。
 
-第一版 provider manager 的读取顺序为：运行时 gate、参数组装、内存缓存、文件缓存、provider 请求、写回缓存、provider 失败时 stale fallback。DB snapshot 会在后续快照表落地后接入；关闭状态下 manager 不访问缓存目录、不创建 provider。
+第一版 provider manager 的读取顺序为：运行时 gate、参数组装、内存缓存、文件缓存、provider 请求、写回缓存、provider 失败时 stale fallback。关闭状态下 manager 不访问缓存目录、不创建 provider。
 
 缓存 key 包含 provider、capability、code、trade_date、market_phase、as_of_bucket、schema_version 和 query params。`refresh=true` 只绕过 fresh cache 命中，不绕过 provider gate、限流或失败降级；provider 返回的 `empty` 会保留为合法空结果，不降级成 `unavailable`。
+
+## Snapshot 边界
+
+DB snapshot 第一版仅新增 `ashare_intelligence_snapshot` 表和 repository，不修改既有表列。唯一槽位为 `(snapshot_type, trade_date, as_of_bucket, schema_version, provider_set)`；同槽位重复写入会保留 `snapshot_id` 并递增 `revision`。回滚代码时允许保留该孤立表。
 
 `a-stock-data/SKILL.md` 后续应收敛为薄说明层，只指导调用 `astock_data` package，不承载运行时复制或 `exec` 的网络代码。

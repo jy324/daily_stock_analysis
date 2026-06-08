@@ -222,6 +222,54 @@ class FundamentalSnapshot(Base):
         return f"<FundamentalSnapshot(query_id={self.query_id}, code={self.code})>"
 
 
+class AShareIntelligenceSnapshot(Base):
+    """A-share intelligence snapshot persisted for deterministic evidence."""
+
+    __tablename__ = 'ashare_intelligence_snapshot'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snapshot_id = Column(String(64), nullable=False, unique=True, index=True)
+    snapshot_type = Column(String(64), nullable=False, index=True)
+    trade_date = Column(Date, nullable=False, index=True)
+    as_of = Column(DateTime, nullable=False)
+    as_of_bucket = Column(String(64), nullable=False, index=True)
+    run_id = Column(String(64), index=True)
+    provider_set = Column(String(128), nullable=False, index=True)
+    is_final = Column(Boolean, default=False, nullable=False)
+    revision = Column(Integer, default=1, nullable=False)
+    coverage_ratio = Column(Float)
+    payload_json = Column(Text, nullable=False)
+    schema_version = Column(String(32), nullable=False, index=True)
+    source_hash = Column(String(64), nullable=False, index=True)
+    config_hash = Column(String(64))
+    generated_at = Column(DateTime, default=datetime.now, nullable=False, index=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            'snapshot_type',
+            'trade_date',
+            'as_of_bucket',
+            'schema_version',
+            'provider_set',
+            name='uix_ashare_snapshot_slot',
+        ),
+        Index(
+            'ix_ashare_snapshot_lookup',
+            'snapshot_type',
+            'trade_date',
+            'as_of_bucket',
+            'schema_version',
+            'provider_set',
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<AShareIntelligenceSnapshot(type={self.snapshot_type}, "
+            f"trade_date={self.trade_date}, provider_set={self.provider_set})>"
+        )
+
+
 class AnalysisHistory(Base):
     """
     分析结果历史记录模型

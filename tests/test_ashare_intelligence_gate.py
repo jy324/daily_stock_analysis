@@ -40,6 +40,7 @@ class AShareIntelligenceConfigTestCase(unittest.TestCase):
         self.assertEqual(config.ashare_provider_priority, "astock_data")
         self.assertEqual(config.ashare_cache_dir, "./data/ashare_cache")
         self.assertEqual(config.ashare_config_file, "config/ashare_intelligence.yaml")
+        self.assertFalse(config.ashare_scoring_enabled)
 
     @patch("src.config.setup_env")
     @patch.object(Config, "_parse_litellm_yaml", return_value=[])
@@ -54,6 +55,7 @@ class AShareIntelligenceConfigTestCase(unittest.TestCase):
             "ASHARE_PROVIDER_PRIORITY": "astock_data,custom",
             "ASHARE_CACHE_DIR": "./tmp/ashare",
             "ASHARE_CONFIG_FILE": "config/custom_ashare.yaml",
+            "ASHARE_SCORING_ENABLED": "true",
         }
         with patch.dict(os.environ, env, clear=True):
             config = Config._load_from_env()
@@ -62,6 +64,7 @@ class AShareIntelligenceConfigTestCase(unittest.TestCase):
         self.assertEqual(config.ashare_provider_priority, "astock_data,custom")
         self.assertEqual(config.ashare_cache_dir, "./tmp/ashare")
         self.assertEqual(config.ashare_config_file, "config/custom_ashare.yaml")
+        self.assertTrue(config.ashare_scoring_enabled)
 
 
 class AShareIntelligenceCapabilitiesApiTestCase(unittest.TestCase):
@@ -143,6 +146,37 @@ class AShareIntelligenceCapabilitiesApiTestCase(unittest.TestCase):
         self.assertTrue(body["report_enabled"])
         self.assertTrue(body["agent_tools_enabled"])
         self.assertFalse(body["scoring_enabled"])
+        self.assertNotIn("astock_data", sys.modules)
+
+    def test_capabilities_endpoint_reports_scoring_only_when_env_and_yaml_enabled(self) -> None:
+        temp_dir, client = _make_client()
+        config_file = Path(temp_dir.name) / "ashare.yaml"
+        config_file.write_text(
+            "\n".join(
+                [
+                    "scoring:",
+                    "  enabled: true",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        try:
+            env = {
+                "ASHARE_INTELLIGENCE_ENABLED": "true",
+                "ASHARE_SCORING_ENABLED": "true",
+                "ASHARE_CONFIG_FILE": str(config_file),
+            }
+            with patch.dict(os.environ, env, clear=True):
+                Config.reset_instance()
+                fake_spec = SimpleNamespace(name="astock_data")
+                with patch("src.services.ashare_intelligence_service.importlib.util.find_spec", return_value=fake_spec):
+                    response = client.get("/api/v1/capabilities")
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()["ashare_intelligence"]
+        self.assertTrue(body["scoring_enabled"])
         self.assertNotIn("astock_data", sys.modules)
 
     def test_registered_ashare_route_rejects_when_feature_disabled(self) -> None:

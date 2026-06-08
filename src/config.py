@@ -645,6 +645,7 @@ class Config:
     ashare_provider_priority: str = "astock_data"
     ashare_cache_dir: str = "./data/ashare_cache"
     ashare_config_file: str = "config/ashare_intelligence.yaml"
+    ashare_scoring_enabled: bool = False
 
     # === AI 分析配置 ===
     # LiteLLM unified model config (provider/model format, e.g. gemini/gemini-3.1-pro-preview)
@@ -1826,6 +1827,10 @@ class Config:
             ashare_provider_priority=os.getenv('ASHARE_PROVIDER_PRIORITY', 'astock_data').strip() or 'astock_data',
             ashare_cache_dir=os.getenv('ASHARE_CACHE_DIR', './data/ashare_cache').strip() or './data/ashare_cache',
             ashare_config_file=os.getenv('ASHARE_CONFIG_FILE', 'config/ashare_intelligence.yaml').strip() or 'config/ashare_intelligence.yaml',
+            ashare_scoring_enabled=parse_env_bool(
+                os.getenv('ASHARE_SCORING_ENABLED'),
+                default=False,
+            ),
         )
     
     @classmethod

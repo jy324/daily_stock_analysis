@@ -31,7 +31,11 @@ class AShareIntelligenceService:
             provider_installed=is_astock_data_installed(),
             report_enabled=enabled and _nested_enabled(feature_config, "report"),
             agent_tools_enabled=enabled and _nested_enabled(feature_config, "agent_tools"),
-            scoring_enabled=enabled and _nested_enabled(feature_config, "scoring"),
+            scoring_enabled=(
+                enabled
+                and bool(getattr(self.config, "ashare_scoring_enabled", False))
+                and _nested_enabled(feature_config, "scoring")
+            ),
         )
 
     def status(self) -> Dict[str, Any]:

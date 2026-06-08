@@ -123,6 +123,7 @@ class MarketAnalyzer:
         analyzer=None,
         region: str = "cn",
         config: Optional[Any] = None,
+        intelligence_service: Optional[Any] = None,
     ):
         """
         初始化大盘分析器
@@ -132,17 +133,28 @@ class MarketAnalyzer:
             analyzer: AI分析器实例（用于调用LLM）
             region: 市场区域 cn=A股 us=美股
             config: 本次复盘使用的配置；未传时读取全局配置
+            intelligence_service: 可选 A 股情报服务，默认不构建也不访问外部 provider
         """
         self.config = config or get_config()
         self.search_service = search_service
         self.analyzer = analyzer
         self.data_manager = DataFetcherManager()
         self.region = region if region in ("cn", "us", "hk") else "cn"
+        self.intelligence_service = intelligence_service or self._default_intelligence_service()
         self.profile: MarketProfile = get_profile(self.region)
         self.strategy = get_market_strategy_blueprint(self.region)
 
     def _log_context(self) -> str:
         return f"component=market_review region={self.region}"
+
+    def _default_intelligence_service(self) -> Optional[Any]:
+        if self.region != "cn":
+            return None
+        if not bool(getattr(getattr(self, "config", None), "ashare_intelligence_enabled", False)):
+            return None
+        from src.services.ashare_intelligence_service import AShareIntelligenceService
+
+        return AShareIntelligenceService(self.config)
 
     def _get_review_language(self) -> str:
         return normalize_report_language(
@@ -626,7 +638,148 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 "turnover_unit": self._get_turnover_unit_label(),
             }
 
+        ashare_evidence = self._build_ashare_capital_evidence(overview)
+        if ashare_evidence:
+            payload["ashare_intelligence"] = {
+                "capital_evidence": ashare_evidence["result"],
+            }
+            payload["sections"] = self._with_ashare_capital_sections(
+                sections,
+                evidence_markdown=ashare_evidence["markdown"],
+            )
+
         return payload
+
+    def _build_ashare_capital_evidence(self, overview: MarketOverview) -> Optional[Dict[str, Any]]:
+        if self.region != "cn":
+            return None
+        if not bool(getattr(getattr(self, "config", None), "ashare_intelligence_enabled", False)):
+            return None
+        service = getattr(self, "intelligence_service", None)
+        if service is None:
+            return None
+
+        try:
+            result = service.get_capability(
+                "sector_fund_flow",
+                trade_date=overview.date,
+                as_of_bucket=f"{overview.date}-market-review",
+                limit=5,
+            )
+        except Exception as exc:
+            logger.warning("A 股情报资金证据获取失败，市场复盘继续: %s", exc)
+            return None
+
+        return {
+            "result": result.model_dump(mode="json") if hasattr(result, "model_dump") else result,
+            "markdown": self._render_ashare_capital_evidence_markdown(result),
+        }
+
+    def _with_ashare_capital_sections(
+        self,
+        sections: List[Dict[str, str]],
+        *,
+        evidence_markdown: str,
+    ) -> List[Dict[str, str]]:
+        objective_title = "资金与情绪：客观数据"
+        interpretation_title = "资金与情绪：分析解读"
+        if self._get_review_language() == "en":
+            objective_title = "Capital and Sentiment: Objective Data"
+            interpretation_title = "Capital and Sentiment: Interpretation"
+
+        evidence_section = {
+            "key": "ashare_capital_evidence",
+            "title": objective_title,
+            "markdown": evidence_markdown,
+        }
+        updated_sections: List[Dict[str, str]] = []
+        inserted = False
+        for section in sections:
+            if not inserted and self._is_capital_interpretation_section(section):
+                updated_sections.append(evidence_section)
+                updated_sections.append({
+                    "key": "llm_interpretation",
+                    "title": interpretation_title,
+                    "markdown": section.get("markdown", ""),
+                })
+                inserted = True
+                continue
+            updated_sections.append(section)
+        if not inserted:
+            updated_sections.append(evidence_section)
+        return updated_sections
+
+    @staticmethod
+    def _is_capital_interpretation_section(section: Dict[str, str]) -> bool:
+        title = str(section.get("title") or "")
+        key = str(section.get("key") or "")
+        text = f"{title} {key}".lower()
+        return any(token in text for token in ("资金", "情绪", "capital", "fund", "sentiment"))
+
+    def _render_ashare_capital_evidence_markdown(self, result: Any) -> str:
+        status = str(getattr(result, "status", "unavailable"))
+        source = getattr(result, "source", None)
+        provider = str(getattr(source, "provider", getattr(result, "provider", "unknown")))
+        as_of = str(getattr(source, "as_of", ""))
+        is_partial = bool(getattr(source, "is_partial", False))
+        rows = self._ashare_evidence_rows(getattr(result, "data", None))
+
+        lines = [
+            f"- 数据状态：`{status}`；来源：`{provider}`；截至：{as_of or 'N/A'}；盘中：{'是' if is_partial else '否'}",
+            "",
+        ]
+        if not rows:
+            lines.append("- 合法空结果：当前未返回可展示的板块资金记录。")
+            return "\n".join(lines).strip()
+
+        lines.extend([
+            "| 板块 | provider_sector_code | taxonomy | sector_type | 主力净流入 | 涨跌幅 |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ])
+        for row in rows[:5]:
+            lines.append(
+                "| {name} | {code} | {taxonomy} | {sector_type} | {net} | {change_pct} |".format(
+                    name=self._ashare_cell(row.get("sector_name") or row.get("name")),
+                    code=self._ashare_cell(row.get("provider_sector_code")),
+                    taxonomy=self._ashare_cell(row.get("taxonomy")),
+                    sector_type=self._ashare_cell(row.get("sector_type")),
+                    net=self._ashare_money_cell(
+                        row.get("main_net_inflow")
+                        or row.get("net_inflow")
+                        or row.get("main_net_flow")
+                    ),
+                    change_pct=self._ashare_cell(row.get("change_pct")),
+                )
+            )
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _ashare_evidence_rows(data: Any) -> List[Dict[str, Any]]:
+        if isinstance(data, list):
+            return [row for row in data if isinstance(row, dict)]
+        if not isinstance(data, dict):
+            return []
+        for key in ("rows", "items", "top", "sectors"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return [row for row in value if isinstance(row, dict)]
+        return []
+
+    @staticmethod
+    def _ashare_money_cell(value: Any) -> str:
+        if isinstance(value, dict):
+            amount = value.get("amount")
+            unit = value.get("unit")
+            if amount in (None, "", "-"):
+                return "N/A"
+            return f"{amount} {unit or ''}".strip()
+        return MarketAnalyzer._ashare_cell(value)
+
+    @staticmethod
+    def _ashare_cell(value: Any) -> str:
+        if value in (None, "", "-"):
+            return "N/A"
+        return str(value)
 
     @staticmethod
     def _extract_report_title(report: str) -> str:

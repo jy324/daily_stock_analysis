@@ -44,4 +44,10 @@ DSA 顶层不直接 import `astock_data`。provider factory 通过 `import_modul
 
 DB snapshot 第一版仅新增 `ashare_intelligence_snapshot` 表和 repository，不修改既有表列。唯一槽位为 `(snapshot_type, trade_date, as_of_bucket, schema_version, provider_set)`；同槽位重复写入会保留 `snapshot_id` 并递增 `revision`。回滚代码时允许保留该孤立表。
 
+## 市场复盘接入
+
+`MarketAnalyzer` 仅在 `region == "cn"` 且 `ASHARE_INTELLIGENCE_ENABLED=true` 时构建 A 股情报 service。关闭时市场复盘 payload、报告正文、历史写入和通知渲染保持原行为。
+
+开启后，市场复盘结构化 payload 可追加 `ashare_intelligence.capital_evidence`，并将资金情绪拆成固定 section：`ashare_capital_evidence`（程序生成的客观数据表）和 `llm_interpretation`（LLM 原解释）。程序只格式化 provider 返回的金额和排名，不让 LLM 计算金额、排名或持续性；`partial`、`stale`、`empty` 状态会保留在证据表中。
+
 `a-stock-data/SKILL.md` 后续应收敛为薄说明层，只指导调用 `astock_data` package，不承载运行时复制或 `exec` 的网络代码。

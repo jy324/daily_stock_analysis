@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import yaml
 from fastapi import HTTPException
 
 from src.config import Config
+from src.schemas.ashare_intelligence import AShareIntelligenceResult
 from src.schemas.capabilities import AShareIntelligenceCapability
 
 ASTOCK_DATA_PACKAGE = "astock_data"
@@ -41,6 +42,54 @@ class AShareIntelligenceService:
             "status": "available",
             "provider_priority": getattr(self.config, "ashare_provider_priority", "astock_data"),
         }
+
+    def get_capability(
+        self,
+        capability: str,
+        *,
+        code: Optional[str] = None,
+        trade_date: Optional[str] = None,
+        market_phase: Optional[str] = None,
+        as_of_bucket: Optional[str] = None,
+        refresh: bool = False,
+        run_id: Optional[str] = None,
+        config_hash: Optional[str] = None,
+        is_final: bool = False,
+        manager: Optional[Any] = None,
+        snapshot_repository: Optional[Any] = None,
+        **params: Any,
+    ) -> AShareIntelligenceResult:
+        self.ensure_enabled()
+        self.ensure_provider_installed()
+        if manager is None:
+            from data_provider.intelligence.manager import AShareIntelligenceManager
+
+            manager = AShareIntelligenceManager(self.config)
+
+        result = manager.get_capability(
+            capability,
+            code=code,
+            trade_date=trade_date,
+            market_phase=market_phase,
+            as_of_bucket=as_of_bucket,
+            refresh=refresh,
+            **params,
+        )
+        if snapshot_repository is not None and trade_date and as_of_bucket:
+            snapshot_repository.save_snapshot(
+                snapshot_type=capability,
+                trade_date=trade_date,
+                as_of=result.source.as_of,
+                as_of_bucket=as_of_bucket,
+                run_id=run_id,
+                provider_set=result.provider,
+                is_final=is_final,
+                coverage_ratio=_coverage_ratio(result.coverage),
+                payload=result.model_dump(mode="json"),
+                schema_version="v1",
+                config_hash=config_hash,
+            )
+        return result
 
     def ensure_enabled(self) -> None:
         if not bool(getattr(self.config, "ashare_intelligence_enabled", False)):
@@ -85,3 +134,11 @@ def _nested_enabled(feature_config: Dict[str, Any], section: str) -> bool:
     if not isinstance(raw_section, dict):
         return False
     return bool(raw_section.get("enabled", False))
+
+
+def _coverage_ratio(coverage: Dict[str, Any]) -> Optional[float]:
+    value = coverage.get("coverage_ratio")
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None

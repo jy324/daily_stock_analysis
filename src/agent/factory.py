@@ -27,7 +27,10 @@ Usage::
 import copy
 import logging
 from dataclasses import dataclass
-from typing import List, Optional
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+import yaml
 
 from src.config import AGENT_MAX_STEPS_DEFAULT
 
@@ -37,6 +40,7 @@ logger = logging.getLogger(__name__)
 # Module-level caches
 # ---------------------------------------------------------------------------
 _TOOL_REGISTRY = None
+_TOOL_REGISTRY_CACHE_KEY = None
 _SKILL_MANAGER_PROTOTYPE = None
 # Sentinel used as initial value so None (i.e. no custom dir) compares as "changed"
 # on the very first call, forcing a build rather than accidentally skipping it.
@@ -175,8 +179,12 @@ def _should_use_legacy_default_prompt(
 
 def get_tool_registry():
     """Return a cached ToolRegistry (built once, shared across requests)."""
-    global _TOOL_REGISTRY
-    if _TOOL_REGISTRY is not None:
+    global _TOOL_REGISTRY, _TOOL_REGISTRY_CACHE_KEY
+    from src.config import get_config
+
+    config = get_config()
+    cache_key = _tool_registry_cache_key(config)
+    if _TOOL_REGISTRY is not None and _TOOL_REGISTRY_CACHE_KEY == cache_key:
         return _TOOL_REGISTRY
 
     from src.agent.tools.registry import ToolRegistry
@@ -189,10 +197,38 @@ def get_tool_registry():
     registry = ToolRegistry()
     for tool_fn in ALL_DATA_TOOLS + ALL_ANALYSIS_TOOLS + ALL_SEARCH_TOOLS + ALL_MARKET_TOOLS + ALL_BACKTEST_TOOLS:
         registry.register(tool_fn)
+    if _ashare_agent_tools_enabled(config):
+        from src.agent.tools.ashare_intelligence_tools import ALL_ASHARE_INTELLIGENCE_TOOLS
+
+        for tool_fn in ALL_ASHARE_INTELLIGENCE_TOOLS:
+            registry.register(tool_fn)
 
     _TOOL_REGISTRY = registry
+    _TOOL_REGISTRY_CACHE_KEY = cache_key
     logger.info("[AgentFactory] ToolRegistry cached (%d tools)", len(registry._tools) if hasattr(registry, "_tools") else -1)
     return _TOOL_REGISTRY
+
+
+def _tool_registry_cache_key(config) -> Tuple[bool, str, bool]:
+    return (
+        bool(getattr(config, "ashare_intelligence_enabled", False)),
+        str(getattr(config, "ashare_config_file", "") or ""),
+        _ashare_agent_tools_enabled(config),
+    )
+
+
+def _ashare_agent_tools_enabled(config) -> bool:
+    if not bool(getattr(config, "ashare_intelligence_enabled", False)):
+        return False
+    config_file = Path(str(getattr(config, "ashare_config_file", "") or ""))
+    if not config_file.exists():
+        return False
+    try:
+        raw = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    section = raw.get("agent_tools") if isinstance(raw, dict) else None
+    return isinstance(section, dict) and bool(section.get("enabled", False))
 
 
 def get_skill_manager(config=None):

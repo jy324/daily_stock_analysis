@@ -40,6 +40,15 @@ A 股情报路由默认注册，但运行时门禁：
 
 `sector-flow` 的 `limit` 硬上限为 50，`capital-flow` 的 `lookback` 硬上限为 120。`refresh=true` 只透传 service，不绕过 feature gate、provider dependency 检查或 provider 限流。
 
+## Agent Tools 边界
+
+Agent A 股工具默认不注册，只有 `ASHARE_INTELLIGENCE_ENABLED=true` 且 `config/ashare_intelligence.yaml` 中 `agent_tools.enabled=true` 时注册。当前工具：
+
+- `get_ashare_market_intelligence`
+- `get_ashare_stock_capital_flow`
+
+Agent 工具禁止刷新 provider：即使传入 `refresh=true`，handler 也按 `refresh=false` 调用 service。市场查询 `limit` 硬上限 50，个股资金流 `lookback` 硬上限 120。工具返回包含 `snapshot_id`、`cache_hit`、`data_status`、`coverage`、`source` 和 `data`。
+
 ## Provider 边界
 
 DSA 顶层不直接 import `astock_data`。provider factory 通过 `import_module("astock_data")` 延迟导入，且 route、tool、service import 阶段不得创建 client 或访问外部网络。

@@ -34,14 +34,21 @@ A 股情报路由默认注册，但运行时门禁：
 - package 缺失：`503 dependency_unavailable`
 - 后续 provider 熔断：`503 provider_unavailable`
 - 后续 refresh 限流：`429 rate_limited`
+- 大盘复盘已运行：`409 duplicate_market_review`
 
 首批 API 路由：
 
 - `GET /api/v1/market/ashare/status`
 - `GET /api/v1/market/ashare/sector-flow`
 - `GET /api/v1/stocks/{code}/capital-flow`
+- `GET /api/v1/stocks/{code}/risk-events`
+- `POST /api/v1/market/ashare/review`
 
-`sector-flow` 的 `limit` 硬上限为 50，`capital-flow` 的 `lookback` 硬上限为 120。`refresh=true` 只透传 service，不绕过 feature gate、provider dependency 检查或 provider 限流。
+`sector-flow` 的 `limit` 硬上限为 50，`capital-flow` 和 `risk-events` 的 `lookback` 硬上限为 120。`refresh=true` 只透传 service，不绕过 feature gate、provider dependency 检查或 provider 限流。
+
+`risk-events` 聚合公告、解禁和个股龙虎榜结构化记录，统一输出 `announcement`、`lockup_expiry`、`dragon_tiger` taxonomy，并按公告 ID、规范化 URL、标题 hash、`code+date+event_type` 去重。全部来源不可用时返回 `503 provider_unavailable`；部分来源成功时返回 `200 status=partial`。
+
+`POST /api/v1/market/ashare/review` 返回 `202 Accepted`，复用现有大盘复盘后台任务队列和共享 lock，固定以 CN 大盘复盘运行。支持 `Idempotency-Key`：相同 key 会派生稳定 task id，已有任务直接返回原 `task_id/trace_id`，不会重复提交。
 
 ## Agent Tools 边界
 

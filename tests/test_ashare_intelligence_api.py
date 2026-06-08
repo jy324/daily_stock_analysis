@@ -7,6 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -105,6 +106,87 @@ class AShareIntelligenceApiTestCase(unittest.TestCase):
         self.assertEqual(call.call_args.args[0], "capital_flow_daily")
         self.assertEqual(call.call_args.kwargs["code"], "600519")
         self.assertEqual(call.call_args.kwargs["lookback"], 20)
+
+    def test_risk_events_endpoint_returns_service_result(self) -> None:
+        temp_dir, client = _client()
+        risk_result = _result("partial")
+        risk_result.capability = "risk_events"
+        risk_result.data = {"events": []}
+        try:
+            with patch.dict(os.environ, {"ASHARE_INTELLIGENCE_ENABLED": "true"}, clear=True):
+                Config.reset_instance()
+                with patch.object(AShareIntelligenceService, "get_risk_events", return_value=risk_result) as call:
+                    response = client.get("/api/v1/stocks/600519/risk-events?lookback=20")
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "partial")
+        self.assertEqual(call.call_args.kwargs["code"], "600519")
+        self.assertEqual(call.call_args.kwargs["lookback"], 20)
+
+    def test_ashare_review_rejects_when_feature_disabled(self) -> None:
+        temp_dir, client = _client()
+        try:
+            response = client.post("/api/v1/market/ashare/review", json={"send_notification": False})
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"], "feature_disabled")
+
+    def test_ashare_review_accepts_background_task_for_cn_region(self) -> None:
+        temp_dir, client = _client()
+        task_queue = SimpleNamespace(
+            get_task=lambda _task_id: None,
+            submit_background_task=lambda task_fn, **kwargs: SimpleNamespace(
+                task_id=kwargs["task_id"],
+                trace_id=kwargs["task_id"],
+            ),
+        )
+        try:
+            with patch.dict(os.environ, {"ASHARE_INTELLIGENCE_ENABLED": "true"}, clear=True):
+                Config.reset_instance()
+                with patch("src.services.ashare_intelligence_service.importlib.util.find_spec", return_value=object()), \
+                        patch("api.v1.endpoints.ashare_intelligence.get_task_queue", return_value=task_queue), \
+                        patch("api.v1.endpoints.ashare_intelligence._try_acquire_market_review_lock", return_value=object()):
+                    response = client.post(
+                        "/api/v1/market/ashare/review",
+                        json={"send_notification": False, "reportLanguage": "en"},
+                        headers={"Idempotency-Key": "review-key"},
+                    )
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(response.status_code, 202)
+        body = response.json()
+        self.assertEqual(body["status"], "accepted")
+        self.assertFalse(body["send_notification"])
+        self.assertTrue(body["task_id"].startswith("ashare-review-"))
+
+    def test_ashare_review_idempotency_key_reuses_existing_task(self) -> None:
+        temp_dir, client = _client()
+        existing_task = SimpleNamespace(task_id="ashare-review-existing", trace_id="trace-existing")
+        task_queue = SimpleNamespace(
+            get_task=lambda _task_id: existing_task,
+            submit_background_task=lambda *args, **kwargs: self.fail("must not submit duplicate task"),
+        )
+        try:
+            with patch.dict(os.environ, {"ASHARE_INTELLIGENCE_ENABLED": "true"}, clear=True):
+                Config.reset_instance()
+                with patch("src.services.ashare_intelligence_service.importlib.util.find_spec", return_value=object()), \
+                        patch("api.v1.endpoints.ashare_intelligence.get_task_queue", return_value=task_queue):
+                    response = client.post(
+                        "/api/v1/market/ashare/review",
+                        headers={"Idempotency-Key": "review-key"},
+                    )
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(response.status_code, 202)
+        body = response.json()
+        self.assertEqual(body["task_id"], "ashare-review-existing")
+        self.assertEqual(body["trace_id"], "trace-existing")
 
 
 if __name__ == "__main__":

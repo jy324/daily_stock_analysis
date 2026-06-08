@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] A 股情报扩展新增默认关闭的 Agent 工具注册，工具返回 `snapshot_id`、`cache_hit`、`data_status` 和 `coverage`，并禁止 Agent 发起 refresh。
 - [改进] Web 新增运行时 capabilities API client，并在大盘复盘详情中将 A 股资金证据放入“输入证据”折叠区。
 - [新功能] 新增默认关闭的 A 股确定性评分契约，低覆盖不输出分数并明确风险压力分数方向。
+- [新功能] A 股情报 API 新增个股风险事件聚合和 A 股大盘复盘异步入口，复用现有后台任务锁并支持 `Idempotency-Key`。
 
 ## [3.21.0] - 2026-06-07
 

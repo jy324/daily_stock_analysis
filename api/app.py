@@ -34,6 +34,10 @@ from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
+# Ensure standard MIME types are registered correctly, overriding any incorrect Windows registry entries
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
+
 # Match src="/assets/foo.js" / href="/assets/foo.css" produced by the
 # vite build. Used by the startup self-check to surface packaging
 # mismatches early (see GitHub #1064 / #1065 / #1050).

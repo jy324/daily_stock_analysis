@@ -108,6 +108,43 @@ class AShareIntelligenceCapabilitiesApiTestCase(unittest.TestCase):
         self.assertTrue(response.json()["ashare_intelligence"]["provider_installed"])
         self.assertNotIn("astock_data", sys.modules)
 
+    def test_capabilities_endpoint_reads_yaml_subfeature_flags_when_enabled(self) -> None:
+        temp_dir, client = _make_client()
+        config_file = Path(temp_dir.name) / "ashare.yaml"
+        config_file.write_text(
+            "\n".join(
+                [
+                    "report:",
+                    "  enabled: true",
+                    "agent_tools:",
+                    "  enabled: true",
+                    "scoring:",
+                    "  enabled: false",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        try:
+            env = {
+                "ASHARE_INTELLIGENCE_ENABLED": "true",
+                "ASHARE_CONFIG_FILE": str(config_file),
+            }
+            with patch.dict(os.environ, env, clear=True):
+                Config.reset_instance()
+                fake_spec = SimpleNamespace(name="astock_data")
+                with patch("src.services.ashare_intelligence_service.importlib.util.find_spec", return_value=fake_spec):
+                    response = client.get("/api/v1/capabilities")
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()["ashare_intelligence"]
+        self.assertTrue(body["enabled"])
+        self.assertTrue(body["report_enabled"])
+        self.assertTrue(body["agent_tools_enabled"])
+        self.assertFalse(body["scoring_enabled"])
+        self.assertNotIn("astock_data", sys.modules)
+
     def test_registered_ashare_route_rejects_when_feature_disabled(self) -> None:
         temp_dir, client = _make_client()
         try:

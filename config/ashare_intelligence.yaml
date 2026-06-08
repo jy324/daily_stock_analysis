@@ -20,6 +20,9 @@ scoring:
 ttl_seconds:
   capital_flow_minute: 300
   capital_flow_daily: 3600
+  sector_fund_flow: 600
   dragon_tiger: 86400
+  dragon_tiger_market: 86400
+  dragon_tiger_stock: 86400
   announcements: 3600
   lockup: 86400

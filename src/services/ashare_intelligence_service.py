@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import importlib.util
+from pathlib import Path
 from typing import Any, Dict
 
+import yaml
 from fastapi import HTTPException
 
 from src.config import Config
@@ -22,12 +24,13 @@ class AShareIntelligenceService:
 
     def capabilities(self) -> AShareIntelligenceCapability:
         enabled = bool(getattr(self.config, "ashare_intelligence_enabled", False))
+        feature_config = _load_feature_config(self.config)
         return AShareIntelligenceCapability(
             enabled=enabled,
             provider_installed=is_astock_data_installed(),
-            report_enabled=enabled and bool(_config_flag(self.config, "report_enabled", False)),
-            agent_tools_enabled=enabled and bool(_config_flag(self.config, "agent_tools_enabled", False)),
-            scoring_enabled=enabled and bool(_config_flag(self.config, "scoring_enabled", False)),
+            report_enabled=enabled and _nested_enabled(feature_config, "report"),
+            agent_tools_enabled=enabled and _nested_enabled(feature_config, "agent_tools"),
+            scoring_enabled=enabled and _nested_enabled(feature_config, "scoring"),
         )
 
     def status(self) -> Dict[str, Any]:
@@ -66,5 +69,19 @@ def is_astock_data_installed() -> bool:
     return importlib.util.find_spec(ASTOCK_DATA_PACKAGE) is not None
 
 
-def _config_flag(config: Config, name: str, default: bool) -> bool:
-    return bool(getattr(config, f"ashare_{name}", default))
+def _load_feature_config(config: Config) -> Dict[str, Any]:
+    config_file = Path(str(getattr(config, "ashare_config_file", "") or ""))
+    if not config_file.exists():
+        return {}
+    try:
+        raw = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _nested_enabled(feature_config: Dict[str, Any], section: str) -> bool:
+    raw_section = feature_config.get(section)
+    if not isinstance(raw_section, dict):
+        return False
+    return bool(raw_section.get("enabled", False))

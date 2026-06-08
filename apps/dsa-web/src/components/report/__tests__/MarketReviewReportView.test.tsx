@@ -97,6 +97,26 @@ const noBreadthMarketReviewPayload: MarketReviewPayload = {
   sections: [],
 };
 
+const ashareEvidencePayload: MarketReviewPayload = {
+  version: 1,
+  kind: 'market_review',
+  region: 'cn',
+  language: 'zh',
+  title: '2026-06-08 大盘复盘',
+  sections: [
+    {
+      key: 'ashare_capital_evidence',
+      title: '资金与情绪：客观数据',
+      markdown: '| 板块 | 主力净流入 |\n| --- | --- |\n| 半导体 | 123 CNY |',
+    },
+    {
+      key: 'llm_interpretation',
+      title: '资金与情绪：分析解读',
+      markdown: 'LLM 解读内容。',
+    },
+  ],
+};
+
 describe('MarketReviewReportView', () => {
   it('uses localized summary card labels and fallbacks for English reports', () => {
     render(
@@ -173,5 +193,20 @@ describe('MarketReviewReportView', () => {
     expect(screen.getByText('S&P 500')).toBeInTheDocument();
     expect(screen.queryByText('Advancers')).not.toBeInTheDocument();
     expect(screen.queryByText('Decliners')).not.toBeInTheDocument();
+  });
+
+  it('renders ashare capital evidence inside a collapsed input evidence panel', () => {
+    render(
+      <MarketReviewReportView
+        payload={ashareEvidencePayload}
+        content="# 大盘复盘"
+        reportLanguage="zh"
+      />,
+    );
+
+    expect(screen.getByText('输入证据')).toBeInTheDocument();
+    expect(screen.getByText('资金与情绪：客观数据')).toBeInTheDocument();
+    expect(screen.getByText('资金与情绪：分析解读')).toBeInTheDocument();
+    expect(screen.queryByTestId('market-review-report')?.textContent).not.toContain('资金与情绪：客观数据');
   });
 });

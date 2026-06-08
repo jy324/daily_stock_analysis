@@ -49,15 +49,20 @@ Object.defineProperty(globalThis, 'IntersectionObserver', {
   value: IntersectionObserverMock,
 });
 
-const hasLocalStorage = (() => {
+const hasUsableLocalStorage = (() => {
   try {
-    return typeof globalThis.localStorage !== 'undefined';
+    return (
+      typeof globalThis.localStorage !== 'undefined'
+      && typeof globalThis.localStorage.getItem === 'function'
+      && typeof globalThis.localStorage.setItem === 'function'
+      && typeof globalThis.localStorage.removeItem === 'function'
+    );
   } catch {
     return false;
   }
 })();
 
-if (!hasLocalStorage) {
+if (!hasUsableLocalStorage) {
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
     value: new MemoryStorageMock(),

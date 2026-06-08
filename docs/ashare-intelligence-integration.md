@@ -49,6 +49,12 @@ Agent A 股工具默认不注册，只有 `ASHARE_INTELLIGENCE_ENABLED=true` 且
 
 Agent 工具禁止刷新 provider：即使传入 `refresh=true`，handler 也按 `refresh=false` 调用 service。市场查询 `limit` 硬上限 50，个股资金流 `lookback` 硬上限 120。工具返回包含 `snapshot_id`、`cache_hit`、`data_status`、`coverage`、`source` 和 `data`。
 
+## Web 边界
+
+Web 新增 `capabilitiesApi.getCapabilities()`，从 `GET /api/v1/capabilities` 读取运行时能力，不通过 snapshot/data endpoint 探测功能可用性。
+
+大盘复盘详情将 `ashare_capital_evidence` section 从正文解读中抽出，放入默认折叠的“输入证据”区域；`llm_interpretation` 保持在正文 sections 中。
+
 ## Provider 边界
 
 DSA 顶层不直接 import `astock_data`。provider factory 通过 `import_module("astock_data")` 延迟导入，且 route、tool、service import 阶段不得创建 client 或访问外部网络。

@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Clipboard, FileText, Gauge, Layers, ShieldAlert, TrendingUp, WalletCards } from 'lucide-react';
+import { BarChart3, ChevronDown, Clipboard, FileText, Gauge, Layers, ShieldAlert, TrendingUp, WalletCards } from 'lucide-react';
 import { historyApi } from '../../api/history';
 import type {
   AnalysisReport,
@@ -156,12 +156,40 @@ const getPayloadSections = (payload?: MarketReviewPayload | null): MarketReviewS
   const payloadTitle = normalizeHeading(payload.title || '');
   return (payload.sections || [])
     .filter((section: MarketReviewPayloadSection) => section.markdown?.trim())
+    .filter((section: MarketReviewPayloadSection) => section.key !== 'ashare_capital_evidence')
     .filter((section: MarketReviewPayloadSection) => normalizeHeading(section.title || '') !== payloadTitle)
     .map((section, index) => ({
       id: `${section.key || index}-${normalizeHeading(section.title).replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-') || 'section'}`,
       title: section.title || 'Review',
       content: section.markdown,
       icon: getSectionIcon(section.title || ''),
+    }));
+};
+
+const getInputEvidenceSections = (payload?: MarketReviewPayload | null): MarketReviewSection[] => {
+  if (!payload) {
+    return [];
+  }
+
+  if (payload.markets) {
+    return Object.entries(payload.markets).flatMap(([region, marketPayload]) => {
+      const marketTitle = marketPayload.title || region.toUpperCase();
+      return getInputEvidenceSections(marketPayload).map((section) => ({
+        ...section,
+        id: `${region}-${section.id}`,
+        title: `${marketTitle} / ${section.title}`,
+      }));
+    });
+  }
+
+  return (payload.sections || [])
+    .filter((section: MarketReviewPayloadSection) => section.key === 'ashare_capital_evidence')
+    .filter((section: MarketReviewPayloadSection) => section.markdown?.trim())
+    .map((section, index) => ({
+      id: `evidence-${section.key || index}`,
+      title: section.title || 'Evidence',
+      content: section.markdown,
+      icon: WalletCards,
     }));
 };
 
@@ -214,6 +242,7 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   last: string;
   change: string;
   highLow: string;
+  inputEvidence: string;
 }> = {
   zh: {
     reviewSummary: '复盘摘要',
@@ -233,6 +262,7 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     last: '最新',
     change: '涨跌幅',
     highLow: '高/低',
+    inputEvidence: '输入证据',
   },
   en: {
     reviewSummary: 'Review Summary',
@@ -252,6 +282,7 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     last: 'Last',
     change: 'Change',
     highLow: 'High/Low',
+    inputEvidence: 'Input Evidence',
   },
 };
 
@@ -292,6 +323,10 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
   );
   const structuredMarketData = useMemo(
     () => getStructuredMarketData(marketReviewPayload),
+    [marketReviewPayload],
+  );
+  const inputEvidenceSections = useMemo(
+    () => getInputEvidenceSections(marketReviewPayload),
     [marketReviewPayload],
   );
   const showStructuredMarketTitles = Boolean(marketReviewPayload?.markets);
@@ -531,22 +566,48 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
           </div>
         </Card>
       ) : (
-        <div data-testid="market-review-report" className="space-y-4">
-          {sections.map(({ id, title, content: sectionContent, icon: Icon }) => (
-            <Card key={id} variant="bordered" padding="md" className="home-panel-card text-left">
-              <div className="mb-3 flex items-center gap-2">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                </span>
-                <h3 className="text-base font-semibold text-foreground">{title}</h3>
-              </div>
-              <ReportMarkdownBody
-                content={sectionContent}
-                className="market-review-markdown"
-              />
+        <>
+          {inputEvidenceSections.length > 0 ? (
+            <Card variant="bordered" padding="md" className="home-panel-card text-left">
+              <details>
+                <summary className="flex cursor-pointer list-none items-center gap-2 text-base font-semibold text-foreground">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <WalletCards className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <span>{marketReviewText.inputEvidence}</span>
+                  <ChevronDown className="ml-auto h-4 w-4 text-secondary-text" aria-hidden="true" />
+                </summary>
+                <div className="mt-4 space-y-4">
+                  {inputEvidenceSections.map(({ id, title, content: evidenceContent }) => (
+                    <div key={id} className="rounded-lg border border-subtle p-3">
+                      <h4 className="mb-2 text-sm font-semibold text-foreground">{title}</h4>
+                      <ReportMarkdownBody
+                        content={evidenceContent}
+                        className="market-review-markdown"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </details>
             </Card>
-          ))}
-        </div>
+          ) : null}
+          <div data-testid="market-review-report" className="space-y-4">
+            {sections.map(({ id, title, content: sectionContent, icon: Icon }) => (
+              <Card key={id} variant="bordered" padding="md" className="home-panel-card text-left">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Icon className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <h3 className="text-base font-semibold text-foreground">{title}</h3>
+                </div>
+                <ReportMarkdownBody
+                  content={sectionContent}
+                  className="market-review-markdown"
+                />
+              </Card>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

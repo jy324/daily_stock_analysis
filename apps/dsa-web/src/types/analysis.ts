@@ -177,6 +177,7 @@ export interface MarketReviewPayload {
   sectors?: SectorRankings;
   news?: Array<Record<string, unknown>>;
   sections?: MarketReviewPayloadSection[];
+  ashareIntelligence?: Record<string, unknown>;
   markets?: Record<string, MarketReviewPayload>;
   markdownReport?: string;
 }

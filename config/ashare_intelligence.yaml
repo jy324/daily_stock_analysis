@@ -1,0 +1,25 @@
+# A-share intelligence extension settings.
+#
+# Environment variables keep only the top-level gate and paths. Detailed
+# feature switches stay here so .env does not grow with PR-by-PR internals.
+
+schema_version: v1
+
+report:
+  enabled: false
+
+agent_tools:
+  enabled: false
+  market_query_budget: 3
+  stock_query_budget: 10
+  allow_refresh: false
+
+scoring:
+  enabled: false
+
+ttl_seconds:
+  capital_flow_minute: 300
+  capital_flow_daily: 3600
+  dragon_tiger: 86400
+  announcements: 3600
+  lockup: 86400

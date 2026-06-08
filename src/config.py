@@ -640,6 +640,12 @@ class Config:
     alphasift_enabled: bool = False
     alphasift_install_spec: str = DEFAULT_ALPHASIFT_INSTALL_SPEC
 
+    # === A-share intelligence optional integration ===
+    ashare_intelligence_enabled: bool = False
+    ashare_provider_priority: str = "astock_data"
+    ashare_cache_dir: str = "./data/ashare_cache"
+    ashare_config_file: str = "config/ashare_intelligence.yaml"
+
     # === AI 分析配置 ===
     # LiteLLM unified model config (provider/model format, e.g. gemini/gemini-3.1-pro-preview)
     litellm_model: str = ""  # Primary model; must include provider prefix when set explicitly
@@ -1813,6 +1819,13 @@ class Config:
                 if os.getenv('ALPHASIFT_INSTALL_SPEC') is None
                 else os.getenv('ALPHASIFT_INSTALL_SPEC', '').strip()
             ),
+            ashare_intelligence_enabled=parse_env_bool(
+                os.getenv('ASHARE_INTELLIGENCE_ENABLED'),
+                default=False,
+            ),
+            ashare_provider_priority=os.getenv('ASHARE_PROVIDER_PRIORITY', 'astock_data').strip() or 'astock_data',
+            ashare_cache_dir=os.getenv('ASHARE_CACHE_DIR', './data/ashare_cache').strip() or './data/ashare_cache',
+            ashare_config_file=os.getenv('ASHARE_CONFIG_FILE', 'config/ashare_intelligence.yaml').strip() or 'config/ashare_intelligence.yaml',
         )
     
     @classmethod

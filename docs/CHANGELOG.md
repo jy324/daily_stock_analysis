@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] A 股情报扩展新增 lazy `astock_data` provider adapter、结构化状态 schema 和内存/文件缓存 manager，区分 `empty`、`stale` 与 provider unavailable。
 - [改进] A 股情报扩展新增 DB snapshot 表与 repository，用唯一快照槽位保存 `payload_json`、`source_hash`、`config_hash`、`coverage_ratio` 和 revision。
 - [改进] A 股情报扩展在 CN 大盘复盘 payload 中新增可选资金证据 sections，关闭时不改变既有报告正文或通知渲染。
+- [新功能] A 股情报扩展新增默认受 gate 保护的 `sector-flow` 与个股 `capital-flow` API，返回 `empty`/`partial` 等结构化状态。
 
 ## [3.21.0] - 2026-06-07
 

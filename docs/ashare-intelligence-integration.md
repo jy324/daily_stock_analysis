@@ -32,6 +32,14 @@ A 股情报路由默认注册，但运行时门禁：
 - 后续 provider 熔断：`503 provider_unavailable`
 - 后续 refresh 限流：`429 rate_limited`
 
+首批 API 路由：
+
+- `GET /api/v1/market/ashare/status`
+- `GET /api/v1/market/ashare/sector-flow`
+- `GET /api/v1/stocks/{code}/capital-flow`
+
+`sector-flow` 的 `limit` 硬上限为 50，`capital-flow` 的 `lookback` 硬上限为 120。`refresh=true` 只透传 service，不绕过 feature gate、provider dependency 检查或 provider 限流。
+
 ## Provider 边界
 
 DSA 顶层不直接 import `astock_data`。provider factory 通过 `import_module("astock_data")` 延迟导入，且 route、tool、service import 阶段不得创建 client 或访问外部网络。

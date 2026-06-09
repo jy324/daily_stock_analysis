@@ -82,6 +82,8 @@ class TaskInfo:
     skills: Optional[List[str]] = None
     report_language: Optional[str] = None
     trace_id: Optional[str] = None
+    idempotency_key_hash: Optional[str] = None
+    request_body_hash: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert task info into an API-friendly dictionary."""
@@ -127,6 +129,8 @@ class TaskInfo:
             skills=list(self.skills) if self.skills is not None else None,
             report_language=self.report_language,
             trace_id=self.trace_id or self.task_id,
+            idempotency_key_hash=self.idempotency_key_hash,
+            request_body_hash=self.request_body_hash,
         )
 
 
@@ -465,6 +469,8 @@ class AnalysisTaskQueue:
         message: Optional[str] = "任务已加入队列",
         task_id: Optional[str] = None,
         trace_id: Optional[str] = None,
+        idempotency_key_hash: Optional[str] = None,
+        request_body_hash: Optional[str] = None,
     ) -> TaskInfo:
         """
         Submit a generic background callable with task lifecycle tracking.
@@ -481,6 +487,8 @@ class AnalysisTaskQueue:
             status=TaskStatus.PENDING,
             message=message,
             report_type=report_type,
+            idempotency_key_hash=idempotency_key_hash,
+            request_body_hash=request_body_hash,
         )
 
         with self._data_lock:

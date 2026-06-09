@@ -137,12 +137,18 @@ class AShareIntelligenceApiTestCase(unittest.TestCase):
 
     def test_ashare_review_accepts_background_task_for_cn_region(self) -> None:
         temp_dir, client = _client()
-        task_queue = SimpleNamespace(
-            get_task=lambda _task_id: None,
-            submit_background_task=lambda task_fn, **kwargs: SimpleNamespace(
+        captured_kwargs = {}
+
+        def _submit_background_task(_task_fn, **kwargs):
+            captured_kwargs.update(kwargs)
+            return SimpleNamespace(
                 task_id=kwargs["task_id"],
                 trace_id=kwargs["task_id"],
-            ),
+            )
+
+        task_queue = SimpleNamespace(
+            get_task=lambda _task_id: None,
+            submit_background_task=_submit_background_task,
         )
         try:
             with patch.dict(os.environ, {"ASHARE_INTELLIGENCE_ENABLED": "true"}, clear=True):
@@ -163,6 +169,8 @@ class AShareIntelligenceApiTestCase(unittest.TestCase):
         self.assertEqual(body["status"], "accepted")
         self.assertFalse(body["send_notification"])
         self.assertTrue(body["task_id"].startswith("ashare-review-"))
+        self.assertIsNotNone(captured_kwargs["idempotency_key_hash"])
+        self.assertIsNotNone(captured_kwargs["request_body_hash"])
 
     def test_ashare_review_idempotency_key_reuses_existing_task(self) -> None:
         temp_dir, client = _client()
@@ -187,6 +195,38 @@ class AShareIntelligenceApiTestCase(unittest.TestCase):
         body = response.json()
         self.assertEqual(body["task_id"], "ashare-review-existing")
         self.assertEqual(body["trace_id"], "trace-existing")
+
+    def test_ashare_review_idempotency_key_rejects_different_body(self) -> None:
+        from api.v1.endpoints.ashare_intelligence import _market_review_request_hash
+        from api.v1.schemas.analysis import MarketReviewRequest
+
+        temp_dir, client = _client()
+        existing_task = SimpleNamespace(
+            task_id="ashare-review-existing",
+            trace_id="trace-existing",
+            request_body_hash=_market_review_request_hash(
+                MarketReviewRequest(send_notification=True)
+            ),
+        )
+        task_queue = SimpleNamespace(
+            get_task=lambda _task_id: existing_task,
+            submit_background_task=lambda *args, **kwargs: self.fail("must not submit conflicting task"),
+        )
+        try:
+            with patch.dict(os.environ, {"ASHARE_INTELLIGENCE_ENABLED": "true"}, clear=True):
+                Config.reset_instance()
+                with patch("src.services.ashare_intelligence_service.importlib.util.find_spec", return_value=object()), \
+                        patch("api.v1.endpoints.ashare_intelligence.get_task_queue", return_value=task_queue):
+                    response = client.post(
+                        "/api/v1/market/ashare/review",
+                        json={"send_notification": False},
+                        headers={"Idempotency-Key": "review-key"},
+                    )
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["error"], "idempotency_conflict")
 
 
 if __name__ == "__main__":

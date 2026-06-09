@@ -73,9 +73,22 @@ class AShareAgentToolsTestCase(unittest.TestCase):
             factory._TOOL_REGISTRY_CACHE_KEY = None
         self.temp_dir.cleanup()
 
-    def _write_agent_config(self, enabled: bool) -> str:
+    def _write_agent_config(
+        self,
+        enabled: bool,
+        *,
+        market_query_budget: int = 3,
+        stock_query_budget: int = 10,
+    ) -> str:
         self.config_path.write_text(
-            "\n".join(["agent_tools:", f"  enabled: {'true' if enabled else 'false'}"]),
+            "\n".join(
+                [
+                    "agent_tools:",
+                    f"  enabled: {'true' if enabled else 'false'}",
+                    f"  market_query_budget: {market_query_budget}",
+                    f"  stock_query_budget: {stock_query_budget}",
+                ]
+            ),
             encoding="utf-8",
         )
         return str(self.config_path)
@@ -164,6 +177,65 @@ class AShareAgentToolsTestCase(unittest.TestCase):
         self.assertEqual(result["snapshot_id"], "snap-risk")
         self.assertEqual(result["query"]["lookback"], 120)
         self.assertFalse(result["query"]["refresh"])
+
+    def test_market_query_budget_is_enforced_per_agent_context(self) -> None:
+        from src.agent.ashare_budget import activate_ashare_query_budget, reset_ashare_query_budget
+        from src.agent.tools.ashare_intelligence_tools import _handle_get_ashare_market_intelligence
+
+        calls = {"count": 0}
+
+        class CountingService(FakeService):
+            def get_capability(self, capability: str, **kwargs):
+                calls["count"] += 1
+                return super().get_capability(capability, **kwargs)
+
+        config = _config(self._write_agent_config(True, market_query_budget=1), enabled=True)
+        token = activate_ashare_query_budget(config)
+        try:
+            with patch("src.config.get_config", return_value=config), \
+                    patch("src.agent.tools.ashare_intelligence_tools.AShareIntelligenceService", CountingService):
+                first = _handle_get_ashare_market_intelligence(trade_date="2026-06-08")
+                second = _handle_get_ashare_market_intelligence(trade_date="2026-06-08")
+        finally:
+            reset_ashare_query_budget(token)
+
+        self.assertEqual(first["data_status"], "partial")
+        self.assertEqual(second["error"], "ashare_query_budget_exceeded")
+        self.assertEqual(second["budget_type"], "market")
+        self.assertEqual(calls["count"], 1)
+
+    def test_stock_query_budget_is_shared_by_stock_ashare_tools(self) -> None:
+        from src.agent.ashare_budget import activate_ashare_query_budget, reset_ashare_query_budget
+        from src.agent.tools.ashare_intelligence_tools import (
+            _handle_get_ashare_stock_capital_flow,
+            _handle_get_ashare_stock_risk_events,
+        )
+
+        calls = {"capital": 0, "risk": 0}
+
+        class CountingService(FakeService):
+            def get_capability(self, capability: str, **kwargs):
+                calls["capital"] += 1
+                return super().get_capability(capability, **kwargs)
+
+            def get_risk_events(self, **kwargs):
+                calls["risk"] += 1
+                return super().get_risk_events(**kwargs)
+
+        config = _config(self._write_agent_config(True, stock_query_budget=1), enabled=True)
+        token = activate_ashare_query_budget(config)
+        try:
+            with patch("src.config.get_config", return_value=config), \
+                    patch("src.agent.tools.ashare_intelligence_tools.AShareIntelligenceService", CountingService):
+                first = _handle_get_ashare_stock_capital_flow(code="600519", trade_date="2026-06-08")
+                second = _handle_get_ashare_stock_risk_events(code="600519", trade_date="2026-06-08")
+        finally:
+            reset_ashare_query_budget(token)
+
+        self.assertEqual(first["data_status"], "partial")
+        self.assertEqual(second["error"], "ashare_query_budget_exceeded")
+        self.assertEqual(second["budget_type"], "stock")
+        self.assertEqual(calls, {"capital": 1, "risk": 0})
 
 
 if __name__ == "__main__":

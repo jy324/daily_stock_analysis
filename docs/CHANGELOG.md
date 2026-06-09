@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] A 股情报接入改为依赖 `astock_data.AStockDataClient` 正式 facade，修复 report 子开关未生效、资金证据在 LLM 后获取、个股风险事件混入其他股票解禁记录和资金流 lookback 未裁剪的问题，并让 service 默认写入快照后回填 `snapshot_id`。
 - [新功能] A 股情报新增 runtime skills 与风险事件 Agent 工具，`.claude/skills` 明确保留为开发辅助入口。
 - [文档] 新增 A 股情报分支 upstream sync 基线记录，明确当前 HEAD、相对 `origin/main` 差异、数据库 schema baseline 与未执行 rebase 的边界。
+- [修复] A 股大盘复盘 `Idempotency-Key` 新增请求体 hash 冲突检测，相同 key 不同 body 返回 `409 idempotency_conflict`，并为 A 股 Agent 工具启用请求级查询预算。
 
 ## [3.21.0] - 2026-06-07
 

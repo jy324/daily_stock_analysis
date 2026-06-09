@@ -35,6 +35,7 @@ A 股情报路由默认注册，但运行时门禁：
 - 后续 provider 熔断：`503 provider_unavailable`
 - 后续 refresh 限流：`429 rate_limited`
 - 大盘复盘已运行：`409 duplicate_market_review`
+- 相同 `Idempotency-Key` 携带不同请求体：`409 idempotency_conflict`
 
 首批 API 路由：
 
@@ -48,7 +49,7 @@ A 股情报路由默认注册，但运行时门禁：
 
 `risk-events` 聚合公告、解禁和个股龙虎榜结构化记录，统一输出 `announcement`、`lockup_expiry`、`dragon_tiger` taxonomy，并按公告 ID、规范化 URL、标题 hash、`code+date+event_type` 去重。解禁等可能来自全市场列表的数据会按请求股票代码严格过滤。全部来源不可用时返回 `503 provider_unavailable`；部分来源成功时返回 `200 status=partial`。
 
-`POST /api/v1/market/ashare/review` 返回 `202 Accepted`，复用现有大盘复盘后台任务队列和共享 lock，固定以 CN 大盘复盘运行。支持 `Idempotency-Key`：相同 key 会派生稳定 task id，已有任务直接返回原 `task_id/trace_id`，不会重复提交。
+`POST /api/v1/market/ashare/review` 返回 `202 Accepted`，复用现有大盘复盘后台任务队列和共享 lock，固定以 CN 大盘复盘运行。支持 `Idempotency-Key`：相同 key 会派生稳定 task id，并保存规范化请求体 hash；相同 key + 相同请求体会返回原 `task_id/trace_id`，相同 key + 不同请求体返回 `409 idempotency_conflict`。
 
 ## Agent Tools 边界
 
@@ -58,7 +59,9 @@ Agent A 股工具默认不注册，只有 `ASHARE_INTELLIGENCE_ENABLED=true` 且
 - `get_ashare_stock_capital_flow`
 - `get_ashare_stock_risk_events`
 
-Agent 工具禁止刷新 provider：即使传入 `refresh=true`，handler 也按 `refresh=false` 调用 service。市场查询 `limit` 硬上限 50，个股资金流 `lookback` 硬上限 120。工具返回包含 `snapshot_id`、`cache_hit`、`data_status`、`coverage`、`source` 和 `data`。
+Agent 工具禁止刷新 provider：即使传入 `refresh=true`，handler 也按 `refresh=false` 调用 service。市场查询 `limit` 硬上限 50，个股资金流和风险事件 `lookback` 硬上限 120。工具返回包含 `snapshot_id`、`cache_hit`、`data_status`、`coverage`、`source` 和 `data`。
+
+Agent 每次 `run` / `chat` 会从 `agent_tools.market_query_budget` 和 `agent_tools.stock_query_budget` 创建请求级预算上下文；预算通过 `contextvars` 传入并发工具调用，不使用模块全局计数。市场工具消耗 market 预算，个股资金流和个股风险事件共享 stock 预算；超限时工具返回 `error=ashare_query_budget_exceeded`，不会再调用 provider。
 
 DSA runtime skills 位于 `strategies/ashare_*/SKILL.md`，默认不激活、不参与默认路由，仅在用户显式选择时注入。`.claude/skills/ashare-*` 保留为开发辅助 skill，不作为产品 runtime skill 的唯一入口。
 

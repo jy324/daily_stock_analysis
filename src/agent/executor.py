@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from src.config import get_config
+from src.agent.ashare_budget import activate_ashare_query_budget, reset_ashare_query_budget
 from src.agent.chat_context import build_agent_chat_context_bundle
 from src.agent.llm_adapter import LLMToolAdapter
 from src.agent.provider_trace import extract_provider_trace_turns
@@ -540,7 +541,12 @@ class AgentExecutor:
             {"role": "user", "content": self._build_user_message(task, context)},
         ]
 
-        return self._run_loop(messages, tool_decls, parse_dashboard=True)
+        config = getattr(self.llm_adapter, "_config", None) or get_config()
+        budget_token = activate_ashare_query_budget(config)
+        try:
+            return self._run_loop(messages, tool_decls, parse_dashboard=True)
+        finally:
+            reset_ashare_query_budget(budget_token)
 
     def chat(self, message: str, session_id: str, progress_callback: Optional[Callable] = None, context: Optional[Dict[str, Any]] = None) -> AgentResult:
         """Execute the agent loop for a free-form chat message.
@@ -625,7 +631,11 @@ class AgentExecutor:
         # Persist the user turn immediately so the session appears in history during processing
         user_message_id = conversation_manager.add_message(session_id, "user", message)
 
-        result = self._run_loop(messages, tool_decls, parse_dashboard=False, progress_callback=progress_callback)
+        budget_token = activate_ashare_query_budget(config)
+        try:
+            result = self._run_loop(messages, tool_decls, parse_dashboard=False, progress_callback=progress_callback)
+        finally:
+            reset_ashare_query_budget(budget_token)
 
         # Persist assistant reply (or error note) for context continuity
         if result.success:

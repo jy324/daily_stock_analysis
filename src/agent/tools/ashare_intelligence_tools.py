@@ -7,6 +7,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Dict
 
+from src.agent.ashare_budget import consume_ashare_query_budget
 from src.agent.tools.registry import ToolDefinition, ToolParameter
 from src.config import get_config
 from src.services.ashare_intelligence_service import AShareIntelligenceService
@@ -23,6 +24,9 @@ def _handle_get_ashare_market_intelligence(
 ) -> Dict[str, Any]:
     query_date = trade_date or _default_ashare_trade_date()
     safe_limit = max(1, min(int(limit or 10), MARKET_LIMIT_MAX))
+    budget_error = consume_ashare_query_budget("market")
+    if budget_error:
+        return _budget_error_result(budget_error, query={"trade_date": query_date, "limit": safe_limit, "refresh": False})
     result = AShareIntelligenceService(get_config()).get_capability(
         capability,
         trade_date=query_date,
@@ -41,6 +45,17 @@ def _handle_get_ashare_stock_capital_flow(
 ) -> Dict[str, Any]:
     query_date = trade_date or _default_ashare_trade_date()
     safe_lookback = max(1, min(int(lookback or STOCK_LOOKBACK_MAX), STOCK_LOOKBACK_MAX))
+    budget_error = consume_ashare_query_budget("stock")
+    if budget_error:
+        return _budget_error_result(
+            budget_error,
+            query={
+                "code": code,
+                "trade_date": query_date,
+                "lookback": safe_lookback,
+                "refresh": False,
+            },
+        )
     result = AShareIntelligenceService(get_config()).get_capability(
         "capital_flow_daily",
         code=code,
@@ -68,6 +83,17 @@ def _handle_get_ashare_stock_risk_events(
 ) -> Dict[str, Any]:
     query_date = trade_date or _default_ashare_trade_date()
     safe_lookback = max(1, min(int(lookback or 30), STOCK_LOOKBACK_MAX))
+    budget_error = consume_ashare_query_budget("stock")
+    if budget_error:
+        return _budget_error_result(
+            budget_error,
+            query={
+                "code": code,
+                "trade_date": query_date,
+                "lookback": safe_lookback,
+                "refresh": False,
+            },
+        )
     result = AShareIntelligenceService(get_config()).get_risk_events(
         code=code,
         trade_date=query_date,
@@ -95,6 +121,23 @@ def _tool_result(result: Any, *, query: Dict[str, Any]) -> Dict[str, Any]:
         "provider": getattr(result, "provider", None),
         "source": _source_dict(getattr(result, "source", None)),
         "data": getattr(result, "data", None),
+        "query": query,
+    }
+
+
+def _budget_error_result(error: Dict[str, Any], *, query: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "error": error["error"],
+        "budget_type": error["budget_type"],
+        "budget_limit": error["limit"],
+        "budget_used": error["used"],
+        "data_status": "unavailable",
+        "coverage": {},
+        "cache_hit": False,
+        "snapshot_id": None,
+        "provider": None,
+        "source": {},
+        "data": None,
         "query": query,
     }
 

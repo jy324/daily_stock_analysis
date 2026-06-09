@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -54,9 +55,20 @@ def ashare_market_review(
     request = request or MarketReviewRequest()
     task_queue = get_task_queue()
     task_id = _ashare_review_task_id(idempotency_key)
+    idempotency_key_hash = _idempotency_key_hash(idempotency_key)
+    request_body_hash = _market_review_request_hash(request)
     if task_id:
         existing_task = task_queue.get_task(task_id)
         if existing_task is not None:
+            existing_body_hash = getattr(existing_task, "request_body_hash", None)
+            if existing_body_hash and existing_body_hash != request_body_hash:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "idempotency_conflict",
+                        "message": "Idempotency-Key was already used with a different request body.",
+                    },
+                )
             return MarketReviewAccepted(
                 status="accepted",
                 message="A-share market review task already accepted for this Idempotency-Key.",
@@ -88,6 +100,8 @@ def ashare_market_review(
             message="A-share market review task accepted",
             task_id=task_id,
             trace_id=task_id,
+            idempotency_key_hash=idempotency_key_hash,
+            request_body_hash=request_body_hash,
         )
     except Exception:
         _release_market_review_lock(lock_token)
@@ -193,6 +207,19 @@ def _ashare_review_task_id(idempotency_key: Optional[str]) -> Optional[str]:
         return None
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
     return f"ashare-review-{digest}"
+
+
+def _idempotency_key_hash(idempotency_key: Optional[str]) -> Optional[str]:
+    normalized = (idempotency_key or "").strip()
+    if not normalized:
+        return None
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _market_review_request_hash(request: MarketReviewRequest) -> str:
+    payload = request.model_dump(mode="json", by_alias=False)
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _with_request_report_language(config: Config, report_language: Optional[str]) -> Config:

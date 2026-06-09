@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] Web 新增运行时 capabilities API client，并在大盘复盘详情中将 A 股资金证据放入“输入证据”折叠区。
 - [新功能] 新增默认关闭的 A 股确定性评分契约，低覆盖不输出分数并明确风险压力分数方向。
 - [新功能] A 股情报 API 新增个股风险事件聚合和 A 股大盘复盘异步入口，复用现有后台任务锁并支持 `Idempotency-Key`。
+- [修复] A 股情报接入改为依赖 `astock_data.AStockDataClient` 正式 facade，修复 report 子开关未生效、资金证据在 LLM 后获取、个股风险事件混入其他股票解禁记录和资金流 lookback 未裁剪的问题，并让 service 默认写入快照后回填 `snapshot_id`。
+- [新功能] A 股情报新增 runtime skills 与风险事件 Agent 工具，`.claude/skills` 明确保留为开发辅助入口。
+- [文档] 新增 A 股情报分支 upstream sync 基线记录，明确当前 HEAD、相对 `origin/main` 差异、数据库 schema baseline 与未执行 rebase 的边界。
 
 ## [3.21.0] - 2026-06-07
 

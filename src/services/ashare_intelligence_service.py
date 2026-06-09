@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import hashlib
+import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -19,13 +20,24 @@ from src.schemas.ashare_intelligence import AShareIntelligenceResult, AShareSour
 from src.schemas.capabilities import AShareIntelligenceCapability
 
 ASTOCK_DATA_PACKAGE = "astock_data"
+logger = logging.getLogger(__name__)
 
 
 class AShareIntelligenceService:
     """Expose safe capability checks without constructing external clients."""
 
-    def __init__(self, config: Config):
+    def __init__(
+        self,
+        config: Config,
+        *,
+        manager: Optional[Any] = None,
+        snapshot_repository: Optional[Any] = None,
+        persist_snapshots: bool = True,
+    ):
         self.config = config
+        self._manager = manager
+        self._snapshot_repository = snapshot_repository
+        self._persist_snapshots = persist_snapshots
 
     def capabilities(self) -> AShareIntelligenceCapability:
         enabled = bool(getattr(self.config, "ashare_intelligence_enabled", False))
@@ -69,10 +81,9 @@ class AShareIntelligenceService:
     ) -> AShareIntelligenceResult:
         self.ensure_enabled()
         self.ensure_provider_installed()
+        manager = manager or self._manager
         if manager is None:
-            from data_provider.intelligence.manager import AShareIntelligenceManager
-
-            manager = AShareIntelligenceManager(self.config)
+            manager = self._build_default_manager()
 
         result = manager.get_capability(
             capability,
@@ -83,19 +94,27 @@ class AShareIntelligenceService:
             refresh=refresh,
             **params,
         )
+        if capability == "capital_flow_daily" and code:
+            result = _filter_and_clip_stock_result(result, code=code, lookback=params.get("lookback"))
         if snapshot_repository is not None and trade_date and as_of_bucket:
-            snapshot_repository.save_snapshot(
-                snapshot_type=capability,
+            result = self._persist_snapshot(
+                result,
+                snapshot_repository=snapshot_repository,
                 trade_date=trade_date,
-                as_of=result.source.as_of,
                 as_of_bucket=as_of_bucket,
                 run_id=run_id,
-                provider_set=result.provider,
-                is_final=is_final,
-                coverage_ratio=_coverage_ratio(result.coverage),
-                payload=result.model_dump(mode="json"),
-                schema_version="v1",
                 config_hash=config_hash,
+                is_final=is_final,
+            )
+        elif self._persist_snapshots and trade_date and as_of_bucket and result.status in {"ok", "partial", "empty", "stale"}:
+            result = self._persist_snapshot(
+                result,
+                snapshot_repository=self._default_snapshot_repository(),
+                trade_date=trade_date,
+                as_of_bucket=as_of_bucket,
+                run_id=run_id,
+                config_hash=config_hash,
+                is_final=is_final,
             )
         return result
 
@@ -233,10 +252,62 @@ class AShareIntelligenceService:
             },
         )
 
+    def _build_default_manager(self) -> Any:
+        from data_provider.intelligence.manager import AShareIntelligenceManager
+
+        self._manager = AShareIntelligenceManager(self.config)
+        return self._manager
+
+    def _default_snapshot_repository(self) -> Any:
+        if self._snapshot_repository is None:
+            from src.repositories.ashare_snapshot_repo import AShareSnapshotRepository
+
+            self._snapshot_repository = AShareSnapshotRepository()
+        return self._snapshot_repository
+
+    def _persist_snapshot(
+        self,
+        result: AShareIntelligenceResult,
+        *,
+        snapshot_repository: Any,
+        trade_date: str,
+        as_of_bucket: str,
+        run_id: Optional[str],
+        config_hash: Optional[str],
+        is_final: bool,
+    ) -> AShareIntelligenceResult:
+        try:
+            snapshot = snapshot_repository.save_snapshot(
+                snapshot_type=result.capability,
+                trade_date=trade_date,
+                as_of=result.source.as_of,
+                as_of_bucket=as_of_bucket,
+                run_id=run_id,
+                provider_set=result.provider,
+                is_final=is_final,
+                coverage_ratio=_coverage_ratio(result.coverage),
+                payload=result.model_dump(mode="json"),
+                schema_version="v1",
+                config_hash=config_hash,
+            )
+        except Exception as exc:
+            logger.warning("A-share intelligence snapshot write failed: %s", exc)
+            return result
+
+        result.snapshot_id = getattr(snapshot, "snapshot_id", None)
+        result.snapshot_revision = getattr(snapshot, "revision", None)
+        return result
+
 
 def is_astock_data_installed() -> bool:
     """Return whether astock_data is importable without importing it."""
     return importlib.util.find_spec(ASTOCK_DATA_PACKAGE) is not None
+
+
+def is_ashare_feature_section_enabled(config: Config, section: str) -> bool:
+    if not bool(getattr(config, "ashare_intelligence_enabled", False)):
+        return False
+    return _nested_enabled(_load_feature_config(config), section)
 
 
 def _load_feature_config(config: Config) -> Dict[str, Any]:
@@ -283,6 +354,7 @@ def _risk_events_from_result(code: str, result: AShareIntelligenceResult) -> Lis
     return [
         _normalize_risk_event(code, event_type, item)
         for item in _iter_result_items(result.data)
+        if _raw_event_matches_request_code(item, code, require_explicit_code=result.capability == "lockup")
     ]
 
 
@@ -299,7 +371,7 @@ def _iter_result_items(data: Any) -> List[Any]:
 
 def _normalize_risk_event(code: str, event_type: str, item: Any) -> Dict[str, Any]:
     raw = item if isinstance(item, dict) else {"value": item}
-    event_code = str(_first_value(raw, "code", "stock_code", default=code) or code)
+    event_code = _normalize_stock_code(_first_value(raw, "code", "stock_code", "security_code", "SECURITY_CODE", default=code) or code)
     event_date = _first_value(raw, "date", "trade_date", "effective_date", "unlock_date")
     title = _first_value(raw, "title", "name", "reason", "event_name")
     source_id = _first_value(raw, "announcement_id", "notice_id", "id")
@@ -385,3 +457,70 @@ def _title_hash(title: Optional[str]) -> Optional[str]:
     if not normalized:
         return None
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+
+
+def _raw_event_matches_request_code(
+    item: Any,
+    request_code: str,
+    *,
+    require_explicit_code: bool = False,
+) -> bool:
+    if not isinstance(item, dict):
+        return not require_explicit_code
+    raw_code = _first_value(item, "code", "stock_code", "security_code", "SECURITY_CODE")
+    if raw_code in (None, ""):
+        return not require_explicit_code
+    return _normalize_stock_code(raw_code) == _normalize_stock_code(request_code)
+
+
+def _normalize_stock_code(value: Any) -> str:
+    text = str(value or "").strip().upper()
+    if text.startswith(("SH", "SZ", "BJ")) and len(text) >= 8:
+        return text[2:]
+    if "." in text:
+        return text.split(".", 1)[0]
+    return text
+
+
+def _filter_and_clip_stock_result(
+    result: AShareIntelligenceResult,
+    *,
+    code: str,
+    lookback: Any,
+) -> AShareIntelligenceResult:
+    rows = _iter_result_items(result.data)
+    if not rows:
+        return result
+    normalized_code = _normalize_stock_code(code)
+    filtered = [
+        row
+        for row in rows
+        if _raw_event_matches_request_code(row, normalized_code)
+    ]
+    safe_lookback = _safe_lookback(lookback)
+    clipped = sorted(filtered, key=_row_trade_date, reverse=True)[:safe_lookback]
+    result.data = clipped
+    coverage = dict(result.coverage or {})
+    coverage.update(
+        {
+            "filtered_code": normalized_code,
+            "filtered_count": len(filtered),
+            "requested_lookback": safe_lookback,
+            "returned_count": len(clipped),
+            "coverage_ratio": round(min(len(clipped), safe_lookback) / float(safe_lookback), 4),
+        }
+    )
+    result.coverage = coverage
+    return result
+
+
+def _safe_lookback(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = 120
+    return max(1, min(parsed, 120))
+
+
+def _row_trade_date(row: Dict[str, Any]) -> str:
+    return str(_first_value(row, "trade_date", "date", "TRADE_DATE", "日期", default="") or "")

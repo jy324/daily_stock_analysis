@@ -44,9 +44,9 @@ A 股情报路由默认注册，但运行时门禁：
 - `GET /api/v1/stocks/{code}/risk-events`
 - `POST /api/v1/market/ashare/review`
 
-`sector-flow` 的 `limit` 硬上限为 50，`capital-flow` 和 `risk-events` 的 `lookback` 硬上限为 120。`refresh=true` 只透传 service，不绕过 feature gate、provider dependency 检查或 provider 限流。
+`sector-flow` 的 `limit` 硬上限为 50，`capital-flow` 和 `risk-events` 的 `lookback` 硬上限为 120。默认日期按 `Asia/Shanghai` 解析。`refresh=true` 只透传 service，不绕过 feature gate、provider dependency 检查或 provider 限流。
 
-`risk-events` 聚合公告、解禁和个股龙虎榜结构化记录，统一输出 `announcement`、`lockup_expiry`、`dragon_tiger` taxonomy，并按公告 ID、规范化 URL、标题 hash、`code+date+event_type` 去重。全部来源不可用时返回 `503 provider_unavailable`；部分来源成功时返回 `200 status=partial`。
+`risk-events` 聚合公告、解禁和个股龙虎榜结构化记录，统一输出 `announcement`、`lockup_expiry`、`dragon_tiger` taxonomy，并按公告 ID、规范化 URL、标题 hash、`code+date+event_type` 去重。解禁等可能来自全市场列表的数据会按请求股票代码严格过滤。全部来源不可用时返回 `503 provider_unavailable`；部分来源成功时返回 `200 status=partial`。
 
 `POST /api/v1/market/ashare/review` 返回 `202 Accepted`，复用现有大盘复盘后台任务队列和共享 lock，固定以 CN 大盘复盘运行。支持 `Idempotency-Key`：相同 key 会派生稳定 task id，已有任务直接返回原 `task_id/trace_id`，不会重复提交。
 
@@ -56,8 +56,11 @@ Agent A 股工具默认不注册，只有 `ASHARE_INTELLIGENCE_ENABLED=true` 且
 
 - `get_ashare_market_intelligence`
 - `get_ashare_stock_capital_flow`
+- `get_ashare_stock_risk_events`
 
 Agent 工具禁止刷新 provider：即使传入 `refresh=true`，handler 也按 `refresh=false` 调用 service。市场查询 `limit` 硬上限 50，个股资金流 `lookback` 硬上限 120。工具返回包含 `snapshot_id`、`cache_hit`、`data_status`、`coverage`、`source` 和 `data`。
+
+DSA runtime skills 位于 `strategies/ashare_*/SKILL.md`，默认不激活、不参与默认路由，仅在用户显式选择时注入。`.claude/skills/ashare-*` 保留为开发辅助 skill，不作为产品 runtime skill 的唯一入口。
 
 ## Web 边界
 
@@ -67,21 +70,21 @@ Web 新增 `capabilitiesApi.getCapabilities()`，从 `GET /api/v1/capabilities` 
 
 ## Provider 边界
 
-DSA 顶层不直接 import `astock_data`。provider factory 通过 `import_module("astock_data")` 延迟导入，且 route、tool、service import 阶段不得创建 client 或访问外部网络。
+DSA 顶层不直接 import `astock_data`。provider factory 通过 `import_module("astock_data")` 延迟导入，并只依赖公开 facade `astock_data.AStockDataClient`；route、tool、service import 阶段不得创建 client 或访问外部网络。
 
 第一版 provider manager 的读取顺序为：运行时 gate、参数组装、内存缓存、文件缓存、provider 请求、写回缓存、provider 失败时 stale fallback。关闭状态下 manager 不访问缓存目录、不创建 provider。
 
-缓存 key 包含 provider、capability、code、trade_date、market_phase、as_of_bucket、schema_version 和 query params。`refresh=true` 只绕过 fresh cache 命中，不绕过 provider gate、限流或失败降级；provider 返回的 `empty` 会保留为合法空结果，不降级成 `unavailable`。
+缓存 key 包含 provider、capability、code、trade_date、market_phase、as_of_bucket、schema_version 和 query params。`refresh=true` 只绕过 fresh cache 命中，不绕过 provider gate、限流或失败降级；provider 返回的 `empty` 会保留为合法空结果，不降级成 `unavailable`。若 package 固定返回超过请求 lookback 的历史资金流，adapter 会按交易日期倒序裁剪，并在 coverage 中返回请求与实际数量。
 
 ## Snapshot 边界
 
-DB snapshot 第一版仅新增 `ashare_intelligence_snapshot` 表和 repository，不修改既有表列。唯一槽位为 `(snapshot_type, trade_date, as_of_bucket, schema_version, provider_set)`；同槽位重复写入会保留 `snapshot_id` 并递增 `revision`。回滚代码时允许保留该孤立表。
+DB snapshot 第一版仅新增 `ashare_intelligence_snapshot` 表和 repository，不修改既有表列。唯一槽位为 `(snapshot_type, trade_date, as_of_bucket, schema_version, provider_set)`；同槽位重复写入会保留 `snapshot_id` 并递增 `revision`。Service 层默认注入 repository 并在成功、partial、empty 或 stale 查询后写入快照，保存成功后回填 `snapshot_id` 与 `snapshot_revision`。回滚代码时允许保留该孤立表。
 
 ## 市场复盘接入
 
-`MarketAnalyzer` 仅在 `region == "cn"` 且 `ASHARE_INTELLIGENCE_ENABLED=true` 时构建 A 股情报 service。关闭时市场复盘 payload、报告正文、历史写入和通知渲染保持原行为。
+`MarketAnalyzer` 仅在 `region == "cn"` 且 `ASHARE_INTELLIGENCE_ENABLED=true` 且 `config/ashare_intelligence.yaml` 的 `report.enabled=true` 时构建 A 股情报 service。关闭时市场复盘 payload、报告正文、历史写入和通知渲染保持原行为。
 
-开启后，市场复盘结构化 payload 可追加 `ashare_intelligence.capital_evidence`，并将资金情绪拆成固定 section：`ashare_capital_evidence`（程序生成的客观数据表）和 `llm_interpretation`（LLM 原解释）。程序只格式化 provider 返回的金额和排名，不让 LLM 计算金额、排名或持续性；`partial`、`stale`、`empty` 状态会保留在证据表中。
+开启后，市场复盘在 LLM 生成前获取一次 `sector_fund_flow` 证据，并将压缩摘要注入 prompt；结构化 payload、Markdown section 和历史快照复用同一份证据，不在 `build_market_review_payload()` 阶段再次请求 provider。payload 可追加 `ashare_intelligence.capital_evidence`，并将资金情绪拆成固定 section：`ashare_capital_evidence`（程序生成的客观数据表）和 `llm_interpretation`（LLM 对同一份证据的解释）。程序只格式化 provider 返回的金额和排名，不让 LLM 计算金额、排名或持续性；`partial`、`stale`、`empty`、`unavailable` 状态会保留在证据表中。
 
 `a-stock-data/SKILL.md` 后续应收敛为薄说明层，只指导调用 `astock_data` package，不承载运行时复制或 `exec` 的网络代码。
 

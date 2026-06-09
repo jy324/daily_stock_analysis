@@ -3,7 +3,8 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any, Dict
 
 from src.agent.tools.registry import ToolDefinition, ToolParameter
@@ -20,7 +21,7 @@ def _handle_get_ashare_market_intelligence(
     limit: int = 10,
     refresh: bool = False,
 ) -> Dict[str, Any]:
-    query_date = trade_date or date.today().isoformat()
+    query_date = trade_date or _default_ashare_trade_date()
     safe_limit = max(1, min(int(limit or 10), MARKET_LIMIT_MAX))
     result = AShareIntelligenceService(get_config()).get_capability(
         capability,
@@ -38,10 +39,36 @@ def _handle_get_ashare_stock_capital_flow(
     lookback: int = 120,
     refresh: bool = False,
 ) -> Dict[str, Any]:
-    query_date = trade_date or date.today().isoformat()
+    query_date = trade_date or _default_ashare_trade_date()
     safe_lookback = max(1, min(int(lookback or STOCK_LOOKBACK_MAX), STOCK_LOOKBACK_MAX))
     result = AShareIntelligenceService(get_config()).get_capability(
         "capital_flow_daily",
+        code=code,
+        trade_date=query_date,
+        as_of_bucket=f"{query_date}-agent",
+        lookback=safe_lookback,
+        refresh=False,
+    )
+    return _tool_result(
+        result,
+        query={
+            "code": code,
+            "trade_date": query_date,
+            "lookback": safe_lookback,
+            "refresh": False,
+        },
+    )
+
+
+def _handle_get_ashare_stock_risk_events(
+    code: str,
+    trade_date: str | None = None,
+    lookback: int = 30,
+    refresh: bool = False,
+) -> Dict[str, Any]:
+    query_date = trade_date or _default_ashare_trade_date()
+    safe_lookback = max(1, min(int(lookback or 30), STOCK_LOOKBACK_MAX))
+    result = AShareIntelligenceService(get_config()).get_risk_events(
         code=code,
         trade_date=query_date,
         as_of_bucket=f"{query_date}-agent",
@@ -85,6 +112,10 @@ def _source_dict(source: Any) -> Dict[str, Any]:
         "as_of": getattr(source, "as_of", None),
         "is_partial": getattr(source, "is_partial", None),
     }
+
+
+def _default_ashare_trade_date() -> str:
+    return datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
 
 
 get_ashare_market_intelligence_tool = ToolDefinition(
@@ -167,7 +198,47 @@ get_ashare_stock_capital_flow_tool = ToolDefinition(
 )
 
 
+get_ashare_stock_risk_events_tool = ToolDefinition(
+    name="get_ashare_stock_risk_events",
+    description=(
+        "Get deterministic A-share stock risk events including announcements, lockup events, "
+        "and dragon-tiger activity. Agent refresh requests are ignored."
+    ),
+    parameters=[
+        ToolParameter(
+            name="code",
+            type="string",
+            description="A-share stock code, for example 600519.",
+            required=True,
+        ),
+        ToolParameter(
+            name="trade_date",
+            type="string",
+            description="Trade date in YYYY-MM-DD format. Defaults to Asia/Shanghai today.",
+            required=False,
+        ),
+        ToolParameter(
+            name="lookback",
+            type="integer",
+            description="Risk-event lookback in days. Hard capped at 120.",
+            required=False,
+            default=30,
+        ),
+        ToolParameter(
+            name="refresh",
+            type="boolean",
+            description="Ignored for agent tools; always treated as false.",
+            required=False,
+            default=False,
+        ),
+    ],
+    handler=_handle_get_ashare_stock_risk_events,
+    category="market",
+)
+
+
 ALL_ASHARE_INTELLIGENCE_TOOLS = [
     get_ashare_market_intelligence_tool,
     get_ashare_stock_capital_flow_tool,
+    get_ashare_stock_risk_events_tool,
 ]

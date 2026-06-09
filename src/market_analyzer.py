@@ -103,6 +103,7 @@ class MarketLightReviewResult:
     report: str
     market_light_snapshot: Dict[str, Any]
     structured_payload: Dict[str, Any] = field(default_factory=dict)
+    ashare_capital_evidence: Optional[Dict[str, Any]] = None
 
 
 class MarketAnalyzer:
@@ -150,7 +151,9 @@ class MarketAnalyzer:
     def _default_intelligence_service(self) -> Optional[Any]:
         if self.region != "cn":
             return None
-        if not bool(getattr(getattr(self, "config", None), "ashare_intelligence_enabled", False)):
+        from src.services.ashare_intelligence_service import is_ashare_feature_section_enabled
+
+        if not is_ashare_feature_section_enabled(self.config, "report"):
             return None
         from src.services.ashare_intelligence_service import AShareIntelligenceService
 
@@ -536,7 +539,12 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         
         return all_news
     
-    def generate_market_review(self, overview: MarketOverview, news: List) -> str:
+    def generate_market_review(
+        self,
+        overview: MarketOverview,
+        news: List,
+        ashare_evidence: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """
         使用大模型生成大盘复盘报告
         
@@ -555,7 +563,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             return self._generate_template_review(overview, news)
 
         # 构建 Prompt
-        prompt = self._build_review_prompt(overview, news)
+        prompt = self._build_review_prompt(overview, news, ashare_evidence=ashare_evidence)
 
         logger.info("[大盘] %s action=generate_review status=start", self._log_context())
         # Use the public generate_text() entry point - never access private analyzer attributes.
@@ -582,6 +590,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         news: List,
         report: str,
         market_light_snapshot: Optional[Dict[str, Any]] = None,
+        ashare_evidence: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Build the structured market-review contract consumed by API, Web, and notifications."""
         language = self._get_review_language()
@@ -638,7 +647,6 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 "turnover_unit": self._get_turnover_unit_label(),
             }
 
-        ashare_evidence = self._build_ashare_capital_evidence(overview)
         if ashare_evidence:
             payload["ashare_intelligence"] = {
                 "capital_evidence": ashare_evidence["result"],
@@ -653,7 +661,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
     def _build_ashare_capital_evidence(self, overview: MarketOverview) -> Optional[Dict[str, Any]]:
         if self.region != "cn":
             return None
-        if not bool(getattr(getattr(self, "config", None), "ashare_intelligence_enabled", False)):
+        from src.services.ashare_intelligence_service import is_ashare_feature_section_enabled
+
+        if not is_ashare_feature_section_enabled(self.config, "report"):
             return None
         service = getattr(self, "intelligence_service", None)
         if service is None:
@@ -668,7 +678,28 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             )
         except Exception as exc:
             logger.warning("A 股情报资金证据获取失败，市场复盘继续: %s", exc)
-            return None
+            result = {
+                "capability": "sector_fund_flow",
+                "provider": "unknown",
+                "status": "unavailable",
+                "data": [],
+                "source": {
+                    "provider": "unknown",
+                    "status": "unavailable",
+                    "as_of": datetime.now().isoformat(),
+                    "is_partial": False,
+                    "error": str(exc),
+                },
+                "coverage": {
+                    "coverage_ratio": 0.0,
+                    "warnings": [str(exc)],
+                },
+                "cache_hit": False,
+            }
+            return {
+                "result": result,
+                "markdown": self._render_ashare_capital_evidence_markdown(result),
+            }
 
         return {
             "result": result.model_dump(mode="json") if hasattr(result, "model_dump") else result,
@@ -711,18 +742,16 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
     @staticmethod
     def _is_capital_interpretation_section(section: Dict[str, str]) -> bool:
-        title = str(section.get("title") or "")
         key = str(section.get("key") or "")
-        text = f"{title} {key}".lower()
-        return any(token in text for token in ("资金", "情绪", "capital", "fund", "sentiment"))
+        return key in {"四_资金与情绪", "3_fund_flows"}
 
     def _render_ashare_capital_evidence_markdown(self, result: Any) -> str:
-        status = str(getattr(result, "status", "unavailable"))
-        source = getattr(result, "source", None)
-        provider = str(getattr(source, "provider", getattr(result, "provider", "unknown")))
-        as_of = str(getattr(source, "as_of", ""))
-        is_partial = bool(getattr(source, "is_partial", False))
-        rows = self._ashare_evidence_rows(getattr(result, "data", None))
+        status = str(self._result_value(result, "status", "unavailable"))
+        source = self._result_value(result, "source", None)
+        provider = str(self._source_value(source, "provider", self._result_value(result, "provider", "unknown")))
+        as_of = str(self._source_value(source, "as_of", ""))
+        is_partial = bool(self._source_value(source, "is_partial", False))
+        rows = self._ashare_evidence_rows(self._result_value(result, "data", None))
 
         lines = [
             f"- 数据状态：`{status}`；来源：`{provider}`；截至：{as_of or 'N/A'}；盘中：{'是' if is_partial else '否'}",
@@ -752,6 +781,18 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 )
             )
         return "\n".join(lines).strip()
+
+    @staticmethod
+    def _result_value(result: Any, key: str, default: Any = None) -> Any:
+        if isinstance(result, dict):
+            return result.get(key, default)
+        return getattr(result, key, default)
+
+    @staticmethod
+    def _source_value(source: Any, key: str, default: Any = None) -> Any:
+        if isinstance(source, dict):
+            return source.get(key, default)
+        return getattr(source, key, default)
 
     @staticmethod
     def _ashare_evidence_rows(data: Any) -> List[Dict[str, Any]]:
@@ -1248,7 +1289,12 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         label = str(scores["temperature_label"])
         return score, label
 
-    def _build_review_prompt(self, overview: MarketOverview, news: List) -> str:
+    def _build_review_prompt(
+        self,
+        overview: MarketOverview,
+        news: List,
+        ashare_evidence: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """构建复盘报告 Prompt"""
         review_language = self._get_review_language()
 
@@ -1329,6 +1375,7 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 
         if review_language == "en":
             report_title = self._get_review_title(overview.date).removeprefix("## ").strip()
+            ashare_prompt_block = self._build_ashare_prompt_block(ashare_evidence, language="en")
             return f"""You are a professional US/A/H market analyst. Please produce a concise market recap report based on the data below.
 
 [Requirements]
@@ -1352,6 +1399,8 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 
 {sector_block}
 
+{ashare_prompt_block}
+
 ## Market News
 {news_placeholder}
 
@@ -1372,7 +1421,7 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 ({self._get_index_hint()})
 
 ### 3. Fund Flows
-(Interpret what turnover, participation, and flow signals imply.)
+(Interpret turnover, participation, and the A-share capital evidence above when available.)
 
 ### 4. Sector Highlights
 (Analyze the drivers behind the leading and lagging sectors or themes.)
@@ -1392,6 +1441,7 @@ Output the report content directly, no extra commentary.
 """
 
         # A 股场景使用中文提示语
+        ashare_prompt_block = self._build_ashare_prompt_block(ashare_evidence, language="zh")
         return f"""你是一位专业的A/H/美股市场分析师，请根据以下数据生成一份结构化的{self._get_market_scope_name('zh')}大盘复盘报告。
 
 【重要】输出要求：
@@ -1415,6 +1465,8 @@ Output the report content directly, no extra commentary.
 {stats_block}
 
 {sector_block}
+
+{ashare_prompt_block}
 
 ## 市场新闻
 {news_placeholder}
@@ -1441,7 +1493,7 @@ Output the report content directly, no extra commentary.
 （分析领涨/领跌板块背后的逻辑、持续性和是否形成主线）
 
 ### 四、资金与情绪
-（解读成交额、涨跌停结构、市场宽度和风险偏好）
+（解读成交额、涨跌停结构、市场宽度、风险偏好；如存在 A 股资金情报证据，必须解释同一份证据，不得编造未给出的金额或排名）
 
 ### 五、消息催化
 （结合近三日新闻，提炼真正影响明日交易的催化或扰动）
@@ -1456,6 +1508,68 @@ Output the report content directly, no extra commentary.
 
 请直接输出复盘报告内容，不要输出其他说明文字。
 """
+
+    def _build_ashare_prompt_block(
+        self,
+        ashare_evidence: Optional[Dict[str, Any]],
+        *,
+        language: str,
+    ) -> str:
+        if not ashare_evidence:
+            return ""
+        result = ashare_evidence.get("result") if isinstance(ashare_evidence, dict) else None
+        if not isinstance(result, dict):
+            return ""
+        status = str(result.get("status") or "unavailable")
+        source = result.get("source") if isinstance(result.get("source"), dict) else {}
+        provider = str(source.get("provider") or result.get("provider") or "unknown")
+        as_of = str(source.get("as_of") or "")
+        warnings = result.get("coverage", {}).get("warnings") if isinstance(result.get("coverage"), dict) else None
+        rows = self._ashare_evidence_rows(result.get("data"))
+        if language == "en":
+            lines = [
+                "## A-share Capital Evidence",
+                f"- Status: {status}; provider: {provider}; as_of: {as_of or 'N/A'}",
+            ]
+            if warnings:
+                lines.append(f"- Warnings: {'; '.join(str(item) for item in warnings[:3])}")
+            if rows:
+                lines.append("- Top sector flow rows:")
+                for row in rows[:5]:
+                    lines.append(
+                        "  - {name}: net={net}, change={change}".format(
+                            name=self._ashare_cell(row.get("sector_name") or row.get("name")),
+                            net=self._ashare_money_cell(
+                                row.get("main_net_inflow") or row.get("net_inflow") or row.get("main_net_flow")
+                            ),
+                            change=self._ashare_cell(row.get("change_pct")),
+                        )
+                    )
+            else:
+                lines.append("- No displayable sector-flow rows were returned.")
+            return "\n".join(lines)
+
+        lines = [
+            "## A股资金情报证据",
+            f"- 状态：{status}；来源：{provider}；截至：{as_of or 'N/A'}",
+        ]
+        if warnings:
+            lines.append(f"- 告警：{'; '.join(str(item) for item in warnings[:3])}")
+        if rows:
+            lines.append("- 板块资金摘要：")
+            for row in rows[:5]:
+                lines.append(
+                    "  - {name}: 净流入={net}, 涨跌幅={change}".format(
+                        name=self._ashare_cell(row.get("sector_name") or row.get("name")),
+                        net=self._ashare_money_cell(
+                            row.get("main_net_inflow") or row.get("net_inflow") or row.get("main_net_flow")
+                        ),
+                        change=self._ashare_cell(row.get("change_pct")),
+                    )
+                )
+        else:
+            lines.append("- 未返回可展示的板块资金记录。")
+        return "\n".join(lines)
     
     def _generate_template_review(self, overview: MarketOverview, news: List) -> str:
         """使用模板生成复盘报告（无大模型时的备选方案）"""
@@ -1579,14 +1693,18 @@ Market conditions can change quickly. The data above is for reference only and d
         # 2. 搜索市场新闻
         news = self.search_market_news()
 
-        # 3. 生成复盘报告
-        report = self.generate_market_review(overview, news)
+        # 3. 在 LLM 前获取一次 A 股资金证据，后续 prompt/payload/历史复用同一份结果
+        ashare_evidence = self._build_ashare_capital_evidence(overview)
+
+        # 4. 生成复盘报告
+        report = self.generate_market_review(overview, news, ashare_evidence=ashare_evidence)
         snapshot = self.build_market_light_snapshot(overview)
         structured_payload = self.build_market_review_payload(
             overview,
             news,
             report,
             snapshot,
+            ashare_evidence=ashare_evidence,
         )
 
         logger.info("========== 大盘复盘分析完成 ==========")
@@ -1596,6 +1714,7 @@ Market conditions can change quickly. The data above is for reference only and d
             report=report,
             market_light_snapshot=snapshot,
             structured_payload=structured_payload,
+            ashare_capital_evidence=ashare_evidence,
         )
 
     def run_daily_review(self) -> str:

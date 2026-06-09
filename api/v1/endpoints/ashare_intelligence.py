@@ -10,7 +10,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import uuid
-from datetime import date
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
@@ -108,7 +109,7 @@ def ashare_sector_flow(
     refresh: bool = False,
     config: Config = Depends(get_config_dep),
 ) -> AShareIntelligenceResult:
-    query_date = trade_date or date.today().isoformat()
+    query_date = trade_date or _default_ashare_trade_date()
     return _service_result(
         AShareIntelligenceService(config),
         "sector_fund_flow",
@@ -127,7 +128,7 @@ def ashare_stock_capital_flow(
     refresh: bool = False,
     config: Config = Depends(get_config_dep),
 ) -> AShareIntelligenceResult:
-    query_date = trade_date or date.today().isoformat()
+    query_date = trade_date or _default_ashare_trade_date()
     return _service_result(
         AShareIntelligenceService(config),
         "capital_flow_daily",
@@ -147,7 +148,7 @@ def ashare_stock_risk_events(
     refresh: bool = False,
     config: Config = Depends(get_config_dep),
 ) -> AShareIntelligenceResult:
-    query_date = trade_date or date.today().isoformat()
+    query_date = trade_date or _default_ashare_trade_date()
     try:
         return AShareIntelligenceService(config).get_risk_events(
             code=code,
@@ -229,3 +230,7 @@ def _task_trace_id(task: Any) -> Optional[str]:
     if isinstance(task_id, str) and task_id.strip():
         return task_id
     return None
+
+
+def _default_ashare_trade_date() -> str:
+    return datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()

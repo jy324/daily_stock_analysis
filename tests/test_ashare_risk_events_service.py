@@ -63,7 +63,10 @@ class AShareRiskEventsServiceTestCase(unittest.TestCase):
                 ),
                 "lockup": _result(
                     "lockup",
-                    [{"date": "2026-06-09", "title": "限售股解禁", "unlock_shares": "100万股"}],
+                    [
+                        {"code": "000001", "date": "2026-06-09", "title": "其他公司解禁"},
+                        {"code": "600519", "date": "2026-06-09", "title": "限售股解禁", "unlock_shares": "100万股"},
+                    ],
                 ),
                 "dragon_tiger_stock": _result(
                     "dragon_tiger_stock",
@@ -87,6 +90,7 @@ class AShareRiskEventsServiceTestCase(unittest.TestCase):
         self.assertEqual(events[0]["event_type"], "announcement")
         self.assertEqual(events[0]["normalized_url"], "https://example.com/a")
         self.assertEqual(events[1]["event_type"], "lockup_expiry")
+        self.assertTrue(all(event["code"] == "600519" for event in events))
         self.assertEqual(events[2]["event_type"], "dragon_tiger")
         self.assertEqual(result.coverage["covered_count"], 3)
         self.assertEqual(result.coverage["coverage_ratio"], 1.0)

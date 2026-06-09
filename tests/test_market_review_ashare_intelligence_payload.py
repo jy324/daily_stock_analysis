@@ -48,6 +48,7 @@ def _analyzer(*, region: str, enabled: bool, service=None) -> MarketAnalyzer:
     analyzer.config = SimpleNamespace(
         report_language="zh",
         ashare_intelligence_enabled=enabled,
+        ashare_config_file="missing.yaml",
     )
     analyzer.region = region
     analyzer.profile = get_profile(region)
@@ -57,7 +58,9 @@ def _analyzer(*, region: str, enabled: bool, service=None) -> MarketAnalyzer:
 
 class MarketReviewAShareIntelligencePayloadTestCase(unittest.TestCase):
     def test_init_builds_default_service_only_for_enabled_cn_market(self) -> None:
-        with patch("src.market_analyzer.DataFetcherManager"):
+        with patch("src.market_analyzer.DataFetcherManager"), \
+                patch("src.services.ashare_intelligence_service.is_ashare_feature_section_enabled") as enabled:
+            enabled.side_effect = lambda config, section: bool(getattr(config, "ashare_intelligence_enabled", False)) and section == "report"
             disabled = MarketAnalyzer(config=SimpleNamespace(ashare_intelligence_enabled=False), region="cn")
             us = MarketAnalyzer(config=SimpleNamespace(ashare_intelligence_enabled=True), region="us")
             cn = MarketAnalyzer(config=SimpleNamespace(ashare_intelligence_enabled=True), region="cn")
@@ -85,12 +88,15 @@ class MarketReviewAShareIntelligencePayloadTestCase(unittest.TestCase):
         service = FakeIntelligenceService()
         analyzer = _analyzer(region="cn", enabled=True, service=service)
 
-        payload = analyzer.build_market_review_payload(
-            MarketOverview(date="2026-06-08"),
-            [],
-            "## 2026-06-08 大盘复盘\n\n### 四、资金与情绪\nLLM 解读。",
-            {"dimensions": {}},
-        )
+        with patch("src.services.ashare_intelligence_service.is_ashare_feature_section_enabled", return_value=True):
+            evidence = analyzer._build_ashare_capital_evidence(MarketOverview(date="2026-06-08"))
+            payload = analyzer.build_market_review_payload(
+                MarketOverview(date="2026-06-08"),
+                [],
+                "## 2026-06-08 大盘复盘\n\n### 四、资金与情绪\nLLM 解读。",
+                {"dimensions": {}},
+                ashare_evidence=evidence,
+            )
 
         self.assertEqual(service.calls[0][0], "sector_fund_flow")
         self.assertEqual(service.calls[0][1]["trade_date"], "2026-06-08")
@@ -104,6 +110,38 @@ class MarketReviewAShareIntelligencePayloadTestCase(unittest.TestCase):
         self.assertIn("partial", evidence["markdown"])
         self.assertEqual(interpretation["title"], "资金与情绪：分析解读")
         self.assertIn("LLM 解读", interpretation["markdown"])
+
+    def test_payload_builder_reuses_evidence_without_fetching_provider(self) -> None:
+        service = FakeIntelligenceService()
+        analyzer = _analyzer(region="cn", enabled=True, service=service)
+        evidence = {
+            "result": {
+                "capability": "sector_fund_flow",
+                "provider": "fake",
+                "status": "unavailable",
+                "data": [],
+                "source": {
+                    "provider": "fake",
+                    "status": "unavailable",
+                    "as_of": "2026-06-08T10:30:00+08:00",
+                    "is_partial": False,
+                },
+                "coverage": {"warnings": ["provider down"]},
+                "cache_hit": False,
+            },
+            "markdown": "- 数据状态：`unavailable`",
+        }
+
+        payload = analyzer.build_market_review_payload(
+            MarketOverview(date="2026-06-08"),
+            [],
+            "## 2026-06-08 大盘复盘\n\n### 四、资金与情绪\nLLM 解读。",
+            {"dimensions": {}},
+            ashare_evidence=evidence,
+        )
+
+        self.assertEqual(service.calls, [])
+        self.assertEqual(payload["ashare_intelligence"]["capital_evidence"]["status"], "unavailable")
 
     def test_non_cn_market_does_not_call_ashare_service(self) -> None:
         service = FakeIntelligenceService()

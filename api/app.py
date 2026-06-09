@@ -121,10 +121,24 @@ def _resolve_asset_path(assets_dir: Path, asset_path: str) -> Optional[Path]:
 
 def _missing_asset_media_type(asset_path: str) -> str:
     """Return a safe media type for a missing asset response."""
+    safe_asset_type = _frontend_asset_media_type(asset_path)
+    if safe_asset_type in _SAFE_MISSING_ASSET_MEDIA_TYPES:
+        return safe_asset_type
     content_type, _ = mimetypes.guess_type(asset_path)
     if content_type in _SAFE_MISSING_ASSET_MEDIA_TYPES:
         return content_type
     return "text/plain"
+
+
+def _frontend_asset_media_type(asset_path: str) -> Optional[str]:
+    """Return browser-safe media types for Vite assets."""
+    suffix = Path(asset_path).suffix.lower()
+    if suffix in {".js", ".mjs"}:
+        return "text/javascript"
+    if suffix == ".css":
+        return "text/css"
+    content_type, _ = mimetypes.guess_type(asset_path)
+    return content_type
 
 
 def _warn_if_open_cors_without_auth() -> None:
@@ -410,10 +424,17 @@ def create_app(static_dir: Optional[Path] = None) -> FastAPI:
                     content="not found",
                     status_code=404,
                     media_type="text/plain",
-                )
+            )
             if file_path.is_file():
                 relative_path = file_path.relative_to(assets_root).as_posix()
-                return await assets_static_files.get_response(relative_path, request.scope)
+                response = await assets_static_files.get_response(
+                    relative_path,
+                    request.scope,
+                )
+                media_type = _frontend_asset_media_type(asset_path)
+                if media_type:
+                    response.headers["content-type"] = media_type
+                return response
             return Response(
                 content="asset not found",
                 status_code=404,

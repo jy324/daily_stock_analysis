@@ -13,6 +13,7 @@ Covers:
 import unittest
 import sys
 import os
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -33,7 +34,12 @@ from src.agent.skills.base import Skill, SkillManager
 
 def _builtin_strategy_names() -> set[str]:
     strategies_dir = Path(__file__).resolve().parent.parent / "strategies"
-    return {path.stem for path in strategies_dir.glob("*.yaml")}
+    names = {path.stem for path in strategies_dir.glob("*.yaml")}
+    for path in strategies_dir.rglob("SKILL.md"):
+        raw = path.read_text(encoding="utf-8")
+        match = re.search(r"^name:\s*(.+?)\s*$", raw, flags=re.MULTILINE)
+        names.add(match.group(1).strip() if match else path.parent.name)
+    return names
 
 
 # ============================================================

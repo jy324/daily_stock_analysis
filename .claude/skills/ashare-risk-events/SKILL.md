@@ -4,7 +4,7 @@ description: Inspect A-share risk event evidence such as announcements, lockups,
 default-active: false
 default-router: false
 user-invocable: true
-required-tools: get_ashare_stock_capital_flow
+required-tools: get_ashare_stock_risk_events
 ---
 
 # A 股风险事件
@@ -20,7 +20,7 @@ required-tools: get_ashare_stock_capital_flow
 ## Instructions
 
 - 优先遵循仓库根目录 `AGENTS.md`。
-- 当前运行时只暴露个股资金流 Agent 工具；公告、解禁和风险事件 taxonomy 后续接入 API/service 后再扩展工具。
+- 使用 `get_ashare_stock_risk_events` 返回的公告、解禁和龙虎榜 taxonomy，不通过资金流工具替代风险事件。
 - 风险事件必须使用确定性 taxonomy 和去重依据：公告 ID、规范化 URL、标题 hash、`code+date+event_type`。
 - 不把主力资金解释为真实机构持仓，不把缺失值解释为 0。
 - 历史不足时持续性结论返回 `null` 并说明 `insufficient_history`。

@@ -57,7 +57,7 @@ class AShareIntelligenceServiceSnapshotTestCase(unittest.TestCase):
         manager = FakeManager()
 
         with patch("src.services.ashare_intelligence_service.is_astock_data_installed", return_value=True):
-            result = AShareIntelligenceService(config).get_capability(
+            result = AShareIntelligenceService(config, snapshot_repository=repo).get_capability(
                 "capital_flow_minute",
                 code="600519",
                 trade_date="2026-06-08",
@@ -65,7 +65,6 @@ class AShareIntelligenceServiceSnapshotTestCase(unittest.TestCase):
                 run_id="run-1",
                 config_hash="cfg-1",
                 manager=manager,
-                snapshot_repository=repo,
             )
 
         snapshot = repo.get_snapshot(
@@ -79,6 +78,8 @@ class AShareIntelligenceServiceSnapshotTestCase(unittest.TestCase):
         self.assertEqual(result.status, "ok")
         self.assertEqual(manager.calls, 1)
         self.assertIsNotNone(snapshot)
+        self.assertEqual(result.snapshot_id, snapshot["snapshot_id"])
+        self.assertEqual(result.snapshot_revision, 1)
         self.assertEqual(snapshot["payload"]["data"]["rows"][0]["code"], "600519")
         self.assertEqual(snapshot["coverage_ratio"], 0.75)
 

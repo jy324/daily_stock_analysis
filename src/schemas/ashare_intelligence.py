@@ -30,4 +30,5 @@ class AShareIntelligenceResult(AShareProviderResult):
     provider: str
     cache_hit: bool = False
     snapshot_id: Optional[str] = None
+    snapshot_revision: Optional[int] = None
     stale_reason: Optional[str] = None

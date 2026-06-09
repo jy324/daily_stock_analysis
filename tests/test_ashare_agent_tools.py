@@ -41,6 +41,23 @@ class FakeService:
             snapshot_id="snap-1",
         )
 
+    def get_risk_events(self, **kwargs):
+        return AShareIntelligenceResult(
+            capability="risk_events",
+            provider="fake",
+            status="partial",
+            data={"events": [], "query": kwargs},
+            source=AShareSourceMetadata(
+                provider="fake",
+                status="partial",
+                as_of="2026-06-08T10:30:00+08:00",
+                is_partial=False,
+            ),
+            coverage={"coverage_ratio": 0.5},
+            cache_hit=True,
+            snapshot_id="snap-risk",
+        )
+
 
 class AShareAgentToolsTestCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -71,6 +88,7 @@ class AShareAgentToolsTestCase(unittest.TestCase):
 
         self.assertNotIn("get_ashare_market_intelligence", registry.list_names())
         self.assertNotIn("get_ashare_stock_capital_flow", registry.list_names())
+        self.assertNotIn("get_ashare_stock_risk_events", registry.list_names())
 
     def test_registry_registers_ashare_tools_when_gate_and_agent_tools_enabled(self) -> None:
         config = _config(self._write_agent_config(True), enabled=True)
@@ -80,6 +98,7 @@ class AShareAgentToolsTestCase(unittest.TestCase):
 
         self.assertIn("get_ashare_market_intelligence", registry.list_names())
         self.assertIn("get_ashare_stock_capital_flow", registry.list_names())
+        self.assertIn("get_ashare_stock_risk_events", registry.list_names())
 
     def test_registry_cache_key_tracks_agent_tool_flag(self) -> None:
         config = _config(self._write_agent_config(False), enabled=True)
@@ -128,6 +147,23 @@ class AShareAgentToolsTestCase(unittest.TestCase):
 
         self.assertEqual(result["data"]["query"]["lookback"], 120)
         self.assertEqual(result["data_status"], "partial")
+
+    def test_risk_events_tool_forbids_refresh_and_clamps_lookback(self) -> None:
+        from src.agent.tools.ashare_intelligence_tools import _handle_get_ashare_stock_risk_events
+
+        config = _config(self._write_agent_config(True), enabled=True)
+        with patch("src.config.get_config", return_value=config), \
+                patch("src.agent.tools.ashare_intelligence_tools.AShareIntelligenceService", FakeService):
+            result = _handle_get_ashare_stock_risk_events(
+                code="600519",
+                trade_date="2026-06-08",
+                lookback=999,
+                refresh=True,
+            )
+
+        self.assertEqual(result["snapshot_id"], "snap-risk")
+        self.assertEqual(result["query"]["lookback"], 120)
+        self.assertFalse(result["query"]["refresh"])
 
 
 if __name__ == "__main__":

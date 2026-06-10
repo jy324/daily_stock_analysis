@@ -83,7 +83,7 @@ provider manager 的读取顺序为：运行时 gate、参数组装、按 provid
 
 ## Snapshot 边界
 
-DB snapshot 使用 append-only repository。逻辑槽位由 `(snapshot_type, trade_date, as_of_bucket, schema_version, provider_set_hash)` 标识，`provider_set` 会排序后写入 `provider_set_json` 并计算 hash；同槽位重复写入会新增一行、递增 `revision`，查询默认返回最新 revision。Service 层默认注入 repository 并在成功、partial、empty 或 stale 查询后写入快照，保存成功后回填 `snapshot_id` 与 `snapshot_revision`。回滚代码时允许保留该孤立表。
+DB snapshot 使用 append-only repository。逻辑槽位由 `(snapshot_type, trade_date, as_of_bucket, schema_version, provider_set_hash)` 标识，`provider_set` 会排序后写入 `provider_set_json` 并计算 hash；同槽位重复写入会新增一行、递增 `revision`，查询默认返回最新 revision。SQLite 启动时会将旧的同槽位覆盖表结构升级为 append-only 结构，并回填 provider set hash；历史覆盖掉的旧 revision 无法从旧表恢复。Service 层默认注入 repository 并在成功、partial、empty 或 stale 查询后写入快照，保存成功后回填 `snapshot_id` 与 `snapshot_revision`。回滚代码时允许保留该孤立表。
 
 ## 市场复盘接入
 

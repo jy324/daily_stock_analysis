@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import unittest
+import sqlite3
+import tempfile
 from datetime import datetime
 
 from sqlalchemy import select
@@ -136,6 +138,117 @@ class AShareSnapshotRepositoryTestCase(unittest.TestCase):
         self.assertEqual(second.provider_set, "astock_data,custom")
         self.assertEqual(first.provider_set_hash, second.provider_set_hash)
         self.assertEqual(second.revision, 2)
+
+    def test_legacy_sqlite_snapshot_table_is_migrated_to_append_only(self) -> None:
+        DatabaseManager.reset_instance()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = f"{temp_dir}/legacy.db"
+            connection = sqlite3.connect(db_path)
+            try:
+                connection.execute(
+                    """
+                    CREATE TABLE ashare_intelligence_snapshot (
+                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                        snapshot_id VARCHAR(64) NOT NULL UNIQUE,
+                        snapshot_type VARCHAR(64) NOT NULL,
+                        trade_date DATE NOT NULL,
+                        as_of DATETIME NOT NULL,
+                        as_of_bucket VARCHAR(64) NOT NULL,
+                        run_id VARCHAR(64),
+                        provider_set VARCHAR(128) NOT NULL,
+                        is_final BOOLEAN NOT NULL,
+                        revision INTEGER NOT NULL,
+                        coverage_ratio FLOAT,
+                        payload_json TEXT NOT NULL,
+                        schema_version VARCHAR(32) NOT NULL,
+                        source_hash VARCHAR(64) NOT NULL,
+                        config_hash VARCHAR(64),
+                        generated_at DATETIME NOT NULL,
+                        CONSTRAINT uix_ashare_snapshot_slot UNIQUE (
+                            snapshot_type,
+                            trade_date,
+                            as_of_bucket,
+                            schema_version,
+                            provider_set
+                        )
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO ashare_intelligence_snapshot (
+                        snapshot_id,
+                        snapshot_type,
+                        trade_date,
+                        as_of,
+                        as_of_bucket,
+                        run_id,
+                        provider_set,
+                        is_final,
+                        revision,
+                        coverage_ratio,
+                        payload_json,
+                        schema_version,
+                        source_hash,
+                        config_hash,
+                        generated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "legacy-1",
+                        "sector_fund_flow",
+                        "2026-06-08",
+                        "2026-06-08 10:00:00",
+                        "2026-06-08-api",
+                        "run-1",
+                        "custom,astock_data",
+                        0,
+                        1,
+                        0.5,
+                        '{"status":"ok","rows":[1]}',
+                        "v1",
+                        "hash-1",
+                        "cfg-1",
+                        "2026-06-08 10:01:00",
+                    ),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            migrated_db = DatabaseManager(db_url=f"sqlite:///{db_path}")
+            repo = AShareSnapshotRepository(migrated_db)
+            saved = repo.save_snapshot(
+                snapshot_type="sector_fund_flow",
+                trade_date="2026-06-08",
+                as_of="2026-06-08T10:05:00+08:00",
+                as_of_bucket="2026-06-08-api",
+                run_id="run-2",
+                provider_set="astock_data,custom",
+                is_final=False,
+                coverage_ratio=0.9,
+                payload={"status": "partial", "rows": [2]},
+                schema_version="v1",
+                config_hash="cfg-2",
+            )
+
+            with migrated_db.get_session() as session:
+                count = session.execute(
+                    select(func.count()).select_from(AShareIntelligenceSnapshot)
+                ).scalar_one()
+                migrated = session.execute(
+                    select(AShareIntelligenceSnapshot).where(
+                        AShareIntelligenceSnapshot.snapshot_id == "legacy-1"
+                    )
+                ).scalar_one()
+
+            self.assertEqual(count, 2)
+            self.assertEqual(saved.revision, 2)
+            self.assertEqual(migrated.provider_set, "astock_data,custom")
+            self.assertIsNotNone(migrated.provider_set_json)
+            self.assertIsNotNone(migrated.provider_set_hash)
+
+        DatabaseManager.reset_instance()
 
 
 if __name__ == "__main__":

@@ -906,6 +906,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
 
             # 创建所有表
             Base.metadata.create_all(self._engine)
+            self._ensure_ashare_snapshot_schema()
             self._ensure_schema_migration_record()
 
             self._initialized = True
@@ -924,6 +925,140 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._SessionLocal = None
             self.__class__._instance = None
             raise
+
+    def _ensure_ashare_snapshot_schema(self) -> None:
+        """Upgrade the A-share snapshot table to the append-only schema on SQLite."""
+        if not self._is_sqlite_engine:
+            return
+
+        table_name = AShareIntelligenceSnapshot.__tablename__
+        with self._engine.begin() as connection:
+            if not self._sqlite_table_exists(connection, table_name):
+                return
+
+            columns = self._sqlite_table_columns(connection, table_name)
+            unique_indexes = self._sqlite_unique_index_columns(connection, table_name)
+            target_slot_unique = (
+                "snapshot_type",
+                "trade_date",
+                "as_of_bucket",
+                "schema_version",
+                "provider_set_hash",
+                "revision",
+            )
+
+            if (
+                "provider_set_json" in columns
+                and "provider_set_hash" in columns
+                and target_slot_unique in unique_indexes
+            ):
+                self._backfill_ashare_snapshot_provider_set(connection, table_name)
+                return
+
+            rows = self._read_sqlite_table_rows(connection, table_name)
+            legacy_table_name = f"{table_name}__legacy_{int(time.time() * 1000)}"
+            connection.exec_driver_sql(f'ALTER TABLE "{table_name}" RENAME TO "{legacy_table_name}"')
+            connection.exec_driver_sql(f'DROP TABLE "{legacy_table_name}"')
+            AShareIntelligenceSnapshot.__table__.create(bind=connection, checkfirst=False)
+
+            if rows:
+                normalized_rows = [self._normalize_ashare_snapshot_row(row) for row in rows]
+                connection.execute(AShareIntelligenceSnapshot.__table__.insert(), normalized_rows)
+
+            logger.info("A-share intelligence snapshot table migrated to append-only schema")
+
+    @staticmethod
+    def _sqlite_table_exists(connection, table_name: str) -> bool:
+        row = connection.exec_driver_sql(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+        return row is not None
+
+    @staticmethod
+    def _sqlite_table_columns(connection, table_name: str) -> set[str]:
+        rows = connection.exec_driver_sql(f'PRAGMA table_info("{table_name}")').fetchall()
+        return {str(row[1]) for row in rows}
+
+    @staticmethod
+    def _sqlite_unique_index_columns(connection, table_name: str) -> set[tuple[str, ...]]:
+        unique_indexes: set[tuple[str, ...]] = set()
+        for index_row in connection.exec_driver_sql(f'PRAGMA index_list("{table_name}")').fetchall():
+            index_name = str(index_row[1])
+            is_unique = bool(index_row[2])
+            if not is_unique:
+                continue
+            index_columns = connection.exec_driver_sql(f'PRAGMA index_info("{index_name}")').fetchall()
+            unique_indexes.add(tuple(str(column_row[2]) for column_row in index_columns))
+        return unique_indexes
+
+    @staticmethod
+    def _read_sqlite_table_rows(connection, table_name: str) -> List[Dict[str, Any]]:
+        result = connection.exec_driver_sql(f'SELECT * FROM "{table_name}"')
+        keys = list(result.keys())
+        return [dict(zip(keys, row)) for row in result.fetchall()]
+
+    def _backfill_ashare_snapshot_provider_set(self, connection, table_name: str) -> None:
+        rows = self._read_sqlite_table_rows(connection, table_name)
+        for row in rows:
+            if row.get("provider_set_json") and row.get("provider_set_hash"):
+                continue
+            provider_set_json, provider_set_hash, normalized_provider_set = self._normalize_provider_set_value(
+                row.get("provider_set")
+            )
+            connection.exec_driver_sql(
+                (
+                    f'UPDATE "{table_name}" '
+                    "SET provider_set = ?, provider_set_json = ?, provider_set_hash = ? "
+                    "WHERE id = ?"
+                ),
+                (normalized_provider_set, provider_set_json, provider_set_hash, row.get("id")),
+            )
+
+    def _normalize_ashare_snapshot_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        provider_set_json, provider_set_hash, normalized_provider_set = self._normalize_provider_set_value(
+            row.get("provider_set")
+        )
+        table_columns = AShareIntelligenceSnapshot.__table__.columns
+        normalized = {column.name: row.get(column.name) for column in table_columns if column.name in row}
+        normalized["provider_set"] = normalized_provider_set
+        normalized["provider_set_json"] = row.get("provider_set_json") or provider_set_json
+        normalized["provider_set_hash"] = row.get("provider_set_hash") or provider_set_hash
+        normalized["trade_date"] = self._coerce_sqlite_date(row.get("trade_date"))
+        normalized["as_of"] = self._coerce_sqlite_datetime(row.get("as_of"))
+        normalized["generated_at"] = self._coerce_sqlite_datetime(row.get("generated_at"))
+        normalized["is_final"] = bool(row.get("is_final"))
+        normalized["revision"] = int(row.get("revision") or 1)
+        return normalized
+
+    @staticmethod
+    def _normalize_provider_set_value(provider_set: Any) -> Tuple[str, str, str]:
+        providers = sorted(
+            {
+                part.strip()
+                for part in str(provider_set or "").split(",")
+                if part.strip()
+            }
+        )
+        if not providers:
+            providers = ["unknown"]
+        provider_set_json = json.dumps(providers, ensure_ascii=False, separators=(",", ":"))
+        provider_set_hash = hashlib.sha256(provider_set_json.encode("utf-8")).hexdigest()
+        return provider_set_json, provider_set_hash, ",".join(providers)
+
+    @staticmethod
+    def _coerce_sqlite_date(value: Any) -> date:
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        return date.fromisoformat(str(value))
+
+    @staticmethod
+    def _coerce_sqlite_datetime(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value.replace(tzinfo=None)
+        return datetime.fromisoformat(str(value)).replace(tzinfo=None)
 
     def _ensure_schema_migration_record(self) -> None:
         session = self._SessionLocal()

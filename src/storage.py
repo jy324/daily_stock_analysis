@@ -338,6 +338,104 @@ class AnalysisHistory(Base):
         }
 
 
+class DecisionSignalRecord(Base):
+    """结构化决策信号持久化（workflow B）。
+
+    与自由文本 ``operation_advice`` 并存的可执行信号载体，供报告、告警、回测和
+    持仓分析消费同一结构化契约。新表，由 ``create_all`` 追加创建，不改既有表。
+    """
+
+    __tablename__ = 'decision_signals'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # 来源 / 溯源
+    code = Column(String(10), nullable=False, index=True)
+    market = Column(String(16))
+    analysis_history_id = Column(Integer, index=True)
+    signal_version = Column(Integer, nullable=False, default=1)
+    generated_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    source = Column(String(32), nullable=False, default='llm_structured')
+    operation_advice = Column(Text)
+
+    # 决策
+    direction = Column(String(16), nullable=False, index=True)
+    action = Column(String(16))
+    position_size_pct = Column(Float)
+    confidence_level = Column(String(16))
+    confidence_score = Column(Integer)
+
+    # 入场 / 出场
+    entry_type = Column(String(16), nullable=False, default='none')
+    entry_price = Column(Float)
+    entry_low = Column(Float)
+    entry_high = Column(Float)
+    stop_loss = Column(Float)
+    take_profit = Column(Float)
+
+    # 有效期窗口
+    valid_from = Column(Date)
+    valid_until = Column(Date)
+
+    # 约束 / 上下文（JSON 文本）
+    invalidation_conditions_json = Column(Text)
+    applicable_phases_json = Column(Text)
+    quality_constraints_json = Column(Text)
+
+    # 生命周期
+    state = Column(String(24), nullable=False, default='generated', index=True)
+
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        Index('ix_decision_signals_analysis_version', 'analysis_history_id', 'signal_version'),
+        Index('ix_decision_signals_code_time', 'code', 'generated_at'),
+    )
+
+    @property
+    def invalidation_conditions(self) -> List[str]:
+        return json.loads(self.invalidation_conditions_json or '[]')
+
+    @property
+    def applicable_phases(self) -> List[str]:
+        return json.loads(self.applicable_phases_json or '[]')
+
+    @property
+    def quality_constraints(self) -> Dict[str, Any]:
+        return json.loads(self.quality_constraints_json or '{}')
+
+    def to_signal(self):
+        """Reconstruct the :class:`DecisionSignal` pydantic schema from the row."""
+        from src.schemas.decision_signal import DecisionSignal
+
+        return DecisionSignal(
+            code=self.code,
+            market=self.market,
+            analysis_history_id=self.analysis_history_id,
+            signal_version=self.signal_version,
+            generated_at=self.generated_at,
+            source=self.source,
+            operation_advice=self.operation_advice,
+            direction=self.direction,
+            action=self.action,
+            position_size_pct=self.position_size_pct,
+            confidence_level=self.confidence_level,
+            confidence_score=self.confidence_score,
+            entry_type=self.entry_type,
+            entry_price=self.entry_price,
+            entry_low=self.entry_low,
+            entry_high=self.entry_high,
+            stop_loss=self.stop_loss,
+            take_profit=self.take_profit,
+            valid_from=self.valid_from,
+            valid_until=self.valid_until,
+            invalidation_conditions=self.invalidation_conditions,
+            applicable_phases=self.applicable_phases,
+            quality_constraints=self.quality_constraints,
+            state=self.state,
+        )
+
+
 class BacktestResult(Base):
     """单条分析记录的回测结果。"""
 

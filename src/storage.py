@@ -384,6 +384,11 @@ class DecisionSignalRecord(Base):
 
     # 生命周期
     state = Column(String(24), nullable=False, default='generated', index=True)
+    state_history_json = Column(Text)
+    entered_date = Column(Date)
+    entered_price = Column(Float)
+    closed_date = Column(Date)
+    closed_price = Column(Float)
 
     created_at = Column(DateTime, default=datetime.now)
 
@@ -391,6 +396,10 @@ class DecisionSignalRecord(Base):
         Index('ix_decision_signals_analysis_version', 'analysis_history_id', 'signal_version'),
         Index('ix_decision_signals_code_time', 'code', 'generated_at'),
     )
+
+    @property
+    def state_history(self) -> List[Dict[str, Any]]:
+        return json.loads(self.state_history_json or '[]')
 
     @property
     def invalidation_conditions(self) -> List[str]:
@@ -1005,6 +1014,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             # 创建所有表
             Base.metadata.create_all(self._engine)
             self._ensure_ashare_snapshot_schema()
+            self._ensure_decision_signal_lifecycle_columns()
             self._ensure_schema_migration_record()
 
             self._initialized = True
@@ -1023,6 +1033,34 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._SessionLocal = None
             self.__class__._instance = None
             raise
+
+    def _ensure_decision_signal_lifecycle_columns(self) -> None:
+        """Additively add the B.2 lifecycle columns to an existing decision_signals table.
+
+        Fresh databases get these via ``create_all``; existing B.1-era databases
+        gain them through ``ALTER TABLE ADD COLUMN`` (a cheap, no-rewrite operation
+        on SQLite). Non-SQLite engines are left to ``create_all``.
+        """
+        if not self._is_sqlite_engine:
+            return
+
+        table_name = DecisionSignalRecord.__tablename__
+        with self._engine.begin() as connection:
+            if not self._sqlite_table_exists(connection, table_name):
+                return
+            existing = self._sqlite_table_columns(connection, table_name)
+            additions = {
+                "state_history_json": "TEXT",
+                "entered_date": "DATE",
+                "entered_price": "FLOAT",
+                "closed_date": "DATE",
+                "closed_price": "FLOAT",
+            }
+            for column, declaration in additions.items():
+                if column not in existing:
+                    connection.exec_driver_sql(
+                        f'ALTER TABLE "{table_name}" ADD COLUMN {column} {declaration}'
+                    )
 
     def _ensure_ashare_snapshot_schema(self) -> None:
         """Upgrade the A-share snapshot table to the append-only schema on SQLite."""

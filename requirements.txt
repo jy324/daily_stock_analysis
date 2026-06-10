@@ -18,7 +18,7 @@ baostock>=0.8.0             # Priority 3: Baostock data
 yfinance>=0.2.0             # Priority 4: Yahoo Finance (Fallback)
 longbridge>=0.2.77           # Priority 5: Longbridge OpenAPI fallback for US/HK stocks; OAuth capability checked at runtime
 tickflow>=0.1.0            # TickFlow official SDK (Issue #632, market review enhancement)
-git+https://github.com/jy324/a-stock-data.git@da8bcb3faf924d9bf1eed01d319967039c36fec2#egg=astock-data  # Optional A-share intelligence facade, pinned to a full commit SHA
+git+https://github.com/jy324/a-stock-data.git@991185a569bac2410f5db69159d5550b7e0edf3f#egg=astock-data  # Optional A-share intelligence facade, pinned to a full commit SHA
 # Built-in optional AlphaSift screening engine
 git+https://github.com/ZhuLinsen/alphasift.git@1a0ed8c99b3615c0cb1076e6029827ffc6de2344#egg=alphasift
 

@@ -7,7 +7,7 @@
 - DSA 工作分支：`fix/ashare-p0-readiness`
 - DSA 基线 HEAD：`ed68847f`
 - `a-stock-data` 工作分支：`fix/astock-data-default-providers`
-- `a-stock-data` provider commit：`da8bcb3faf924d9bf1eed01d319967039c36fec2`
+- `a-stock-data` provider commit：`991185a569bac2410f5db69159d5550b7e0edf3f`
 - `requirements.txt` 已固定到上述完整 SHA，不依赖可移动 branch 或 tag。
 - `a-stock-data` 已提供 `AStockDataClient.from_defaults()`，默认装配 Eastmoney/Cninfo provider，覆盖板块资金、个股资金、龙虎榜、解禁和公告 capability。
 - DSA adapter 会优先调用 `AStockDataClient.from_defaults()`；旧版 package 仍可回退到无参构造，但会保持 provider 未配置语义。

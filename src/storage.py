@@ -1030,8 +1030,14 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             return
 
         table_name = AShareIntelligenceSnapshot.__tablename__
-        with self._engine.begin() as connection:
+        connection = self._engine.connect()
+        transaction_started = False
+        try:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            transaction_started = True
             if not self._sqlite_table_exists(connection, table_name):
+                connection.exec_driver_sql("COMMIT")
+                transaction_started = False
                 return
 
             columns = self._sqlite_table_columns(connection, table_name)
@@ -1051,19 +1057,40 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 and target_slot_unique in unique_indexes
             ):
                 self._backfill_ashare_snapshot_provider_set(connection, table_name)
+                connection.exec_driver_sql("COMMIT")
+                transaction_started = False
                 return
 
             rows = self._read_sqlite_table_rows(connection, table_name)
-            legacy_table_name = f"{table_name}__legacy_{int(time.time() * 1000)}"
+            expected_count = len(rows)
+            legacy_table_name = self._legacy_ashare_snapshot_table_name(connection, table_name)
             connection.exec_driver_sql(f'ALTER TABLE "{table_name}" RENAME TO "{legacy_table_name}"')
-            connection.exec_driver_sql(f'DROP TABLE "{legacy_table_name}"')
-            AShareIntelligenceSnapshot.__table__.create(bind=connection, checkfirst=False)
+            self._create_ashare_snapshot_table_for_migration(connection, table_name)
 
             if rows:
                 normalized_rows = [self._normalize_ashare_snapshot_row(row) for row in rows]
                 connection.execute(AShareIntelligenceSnapshot.__table__.insert(), normalized_rows)
+            migrated_count = self._sqlite_table_count(connection, table_name)
+            if migrated_count != expected_count:
+                raise RuntimeError(
+                    f"A-share snapshot migration row count mismatch: {migrated_count} != {expected_count}"
+                )
 
-            logger.info("A-share intelligence snapshot table migrated to append-only schema")
+            connection.exec_driver_sql("COMMIT")
+            transaction_started = False
+            logger.info(
+                "A-share intelligence snapshot table migrated to append-only schema; legacy table retained as %s",
+                legacy_table_name,
+            )
+        except Exception:
+            if transaction_started:
+                try:
+                    connection.exec_driver_sql("ROLLBACK")
+                except Exception as rollback_exc:
+                    logger.warning("A-share snapshot migration rollback failed: %s", rollback_exc)
+            raise
+        finally:
+            connection.close()
 
     @staticmethod
     def _sqlite_table_exists(connection, table_name: str) -> bool:
@@ -1095,6 +1122,74 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         result = connection.exec_driver_sql(f'SELECT * FROM "{table_name}"')
         keys = list(result.keys())
         return [dict(zip(keys, row)) for row in result.fetchall()]
+
+    @staticmethod
+    def _sqlite_table_count(connection, table_name: str) -> int:
+        row = connection.exec_driver_sql(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+        return int(row[0] if row is not None else 0)
+
+    def _legacy_ashare_snapshot_table_name(self, connection, table_name: str) -> str:
+        timestamp = int(time.time() * 1000)
+        base_name = f"{table_name}__legacy_{timestamp}"
+        candidate = base_name
+        suffix = 1
+        while self._sqlite_table_exists(connection, candidate):
+            suffix += 1
+            candidate = f"{base_name}_{suffix}"
+        return candidate
+
+    @staticmethod
+    def _create_ashare_snapshot_table_for_migration(connection, table_name: str) -> None:
+        connection.exec_driver_sql(
+            f'''
+            CREATE TABLE "{table_name}" (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                snapshot_id VARCHAR(64) NOT NULL UNIQUE,
+                snapshot_type VARCHAR(64) NOT NULL,
+                trade_date DATE NOT NULL,
+                as_of DATETIME NOT NULL,
+                as_of_bucket VARCHAR(64) NOT NULL,
+                run_id VARCHAR(64),
+                provider_set VARCHAR(128) NOT NULL,
+                provider_set_json TEXT,
+                provider_set_hash VARCHAR(64),
+                is_final BOOLEAN NOT NULL,
+                revision INTEGER NOT NULL,
+                coverage_ratio FLOAT,
+                payload_json TEXT NOT NULL,
+                schema_version VARCHAR(32) NOT NULL,
+                source_hash VARCHAR(64) NOT NULL,
+                config_hash VARCHAR(64),
+                generated_at DATETIME NOT NULL,
+                CONSTRAINT uix_ashare_snapshot_slot UNIQUE (
+                    snapshot_type,
+                    trade_date,
+                    as_of_bucket,
+                    schema_version,
+                    provider_set_hash,
+                    revision
+                )
+            )
+            '''
+        )
+        DatabaseManager._create_ashare_snapshot_indexes_for_migration(connection)
+
+    @staticmethod
+    def _create_ashare_snapshot_indexes_for_migration(connection) -> None:
+        """Recreate the ORM-defined secondary indexes inside the migration transaction.
+
+        The table DDL above only declares the UNIQUE constraints. The model also
+        defines per-column (`index=True`) and composite (`Index(...)`) indexes;
+        compile them straight from the ORM definition so a migrated database keeps
+        the same index set as a fresh ``create_all`` install and cannot drift.
+        """
+        from sqlalchemy.schema import CreateIndex
+
+        dialect = connection.dialect
+        for index in AShareIntelligenceSnapshot.__table__.indexes:
+            ddl = str(CreateIndex(index).compile(dialect=dialect)).strip()
+            if ddl:
+                connection.exec_driver_sql(ddl)
 
     def _backfill_ashare_snapshot_provider_set(self, connection, table_name: str) -> None:
         rows = self._read_sqlite_table_rows(connection, table_name)

@@ -12,6 +12,13 @@ from data_provider.intelligence.astock_data_provider import create_astock_data_p
 
 
 class FakeAStockDataClient:
+    used_from_defaults = False
+
+    @classmethod
+    def from_defaults(cls):
+        cls.used_from_defaults = True
+        return cls()
+
     def get_stock_flow_history(self, code, *, trade_date=None, lookback=120):
         return {
             "data": [
@@ -48,6 +55,7 @@ class FakeAStockDataClient:
 
 class AStockDataProviderAdapterTestCase(unittest.TestCase):
     def test_adapter_uses_public_facade_and_applies_lookback(self) -> None:
+        FakeAStockDataClient.used_from_defaults = False
         module = types.SimpleNamespace(AStockDataClient=FakeAStockDataClient)
 
         with patch.dict(sys.modules, {"astock_data": module}):
@@ -58,6 +66,7 @@ class AStockDataProviderAdapterTestCase(unittest.TestCase):
             )
 
         self.assertEqual(result.status, "ok")
+        self.assertTrue(FakeAStockDataClient.used_from_defaults)
         self.assertEqual([row["value"] for row in result.data], [9, 8])
         self.assertEqual(result.coverage["filtered_code"], "600519")
         self.assertEqual(result.coverage["requested_lookback"], 2)

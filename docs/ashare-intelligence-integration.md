@@ -75,7 +75,7 @@ Web 新增 `capabilitiesApi.getCapabilities()`，从 `GET /api/v1/capabilities` 
 
 ## Provider 边界
 
-DSA 顶层不直接 import `astock_data`。provider factory 通过 `import_module("astock_data")` 延迟导入，并只依赖公开 facade `astock_data.AStockDataClient`；route、tool、service import 阶段不得创建 client 或访问外部网络。`requirements.txt` 使用完整 commit SHA 固定 `a-stock-data` 依赖，不依赖可移动 `main` 或 tag。
+DSA 顶层不直接 import `astock_data`。provider factory 通过 `import_module("astock_data")` 延迟导入，并只依赖公开 facade `astock_data.AStockDataClient`；如果 package 暴露 `AStockDataClient.from_defaults()`，DSA 会优先使用该入口装配内置 HTTP provider，否则回退到旧版无参构造。route、tool、service import 阶段不得创建 client 或访问外部网络。`requirements.txt` 使用完整 commit SHA 固定 `a-stock-data` 依赖，不依赖可移动 `main` 或 tag。
 
 provider manager 的读取顺序为：运行时 gate、参数组装、按 provider priority 逐个检查内存/文件缓存、按 cache key single-flight 调用 provider、成功后写回缓存、所有 provider 失败时返回 stale fallback。关闭状态下 manager 不访问缓存目录、不创建 provider。损坏文件缓存会隔离为 `.corrupt-*` 文件，避免重复读取；写入缓存后按 `ASHARE_CACHE_MAX_FILES` 清理最旧文件。
 
@@ -83,7 +83,7 @@ provider manager 的读取顺序为：运行时 gate、参数组装、按 provid
 
 ## Snapshot 边界
 
-DB snapshot 使用 append-only repository。逻辑槽位由 `(snapshot_type, trade_date, as_of_bucket, schema_version, provider_set_hash)` 标识，`provider_set` 会排序后写入 `provider_set_json` 并计算 hash；同槽位重复写入会新增一行、递增 `revision`，查询默认返回最新 revision。SQLite 启动时会将旧的同槽位覆盖表结构升级为 append-only 结构，并回填 provider set hash；历史覆盖掉的旧 revision 无法从旧表恢复。Service 层默认注入 repository 并在成功、partial、empty 或 stale 查询后写入快照，保存成功后回填 `snapshot_id` 与 `snapshot_revision`。回滚代码时允许保留该孤立表。
+DB snapshot 使用 append-only repository。逻辑槽位由 `(snapshot_type, trade_date, as_of_bucket, schema_version, provider_set_hash)` 标识，`provider_set` 会排序后写入 `provider_set_json` 并计算 hash；同槽位重复写入会新增一行、递增 `revision`，查询默认返回最新 revision。SQLite 启动时会用显式 `BEGIN IMMEDIATE` 将旧的同槽位覆盖表结构升级为 append-only 结构，并回填 provider set hash；升级成功后旧表会以 `ashare_intelligence_snapshot__legacy_*` 名称保留，失败时 rollback 后旧表仍保持原名和原数据。历史覆盖掉的旧 revision 无法从旧表恢复。Service 层默认注入 repository 并在成功、partial、empty 或 stale 查询后写入快照，保存成功后回填 `snapshot_id` 与 `snapshot_revision`。回滚代码时允许保留该孤立表。
 
 ## 市场复盘接入
 
@@ -95,7 +95,7 @@ DB snapshot 使用 append-only repository。逻辑槽位由 `(snapshot_type, tra
 
 ## Live Smoke
 
-`.github/workflows/ashare-live-smoke.yml` 是观测型 workflow，工作日定时和手动触发。它安装 `requirements.txt` 中固定 SHA 的 `a-stock-data`，开启 A 股情报 gate，并通过 `AShareIntelligenceManager` 真实调用 `sector_fund_flow` provider path，输出 `ashare-live-smoke.json` artifact。该 workflow 的 provider 调用 step `continue-on-error: true`，不会阻断主 CI；在真实 provider 尚未落地或上游不可用时会通过 step failure 暴露 `unavailable` 状态。
+`.github/workflows/ashare-live-smoke.yml` 是 provider 健康 smoke workflow，工作日定时和手动触发。它安装 `requirements.txt` 中固定 SHA 的 `a-stock-data`，开启 A 股情报 gate，并通过 `AShareIntelligenceManager` 真实调用 `sector_fund_flow` provider path，输出 `ashare-live-smoke.json` artifact。该 workflow 不属于 PR 主 CI，但自身会在 provider 不可用、返回 stale、交易日返回 empty 或 partial 覆盖率低于阈值时失败；artifact 上传仍使用 `if: always()` 保留现场。
 
 ## 评分边界
 

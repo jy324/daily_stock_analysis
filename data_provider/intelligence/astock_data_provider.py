@@ -67,6 +67,9 @@ def create_astock_data_provider() -> AStockDataProvider:
     client_factory = getattr(astock_data, "AStockDataClient", None)
     if client_factory is None:
         raise AShareProviderUnavailable("astock_data.AStockDataClient is not available")
+    from_defaults = getattr(client_factory, "from_defaults", None)
+    if callable(from_defaults):
+        return AStockDataProvider(from_defaults())
     return AStockDataProvider(client_factory())
 
 

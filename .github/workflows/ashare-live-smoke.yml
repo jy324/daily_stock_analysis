@@ -30,7 +30,6 @@ jobs:
           python -m pip install -r requirements.txt
 
       - name: Run A-share provider live smoke
-        continue-on-error: true
         env:
           ASHARE_INTELLIGENCE_ENABLED: "true"
           ASHARE_PROVIDER_PRIORITY: "astock_data"
@@ -67,8 +66,26 @@ jobs:
               "source": result.source.model_dump(mode="json") if result.source else None,
           }
           print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
-          if result.status not in {"ok", "partial", "empty", "stale"}:
+          coverage_ratio = 0.0
+          if isinstance(result.coverage, dict):
+              try:
+                  coverage_ratio = float(result.coverage.get("coverage_ratio") or 0.0)
+              except (TypeError, ValueError):
+                  coverage_ratio = 0.0
+          if result.status == "ok":
+              sys.exit(0)
+          if result.status == "partial" and coverage_ratio >= 0.5:
+              sys.exit(0)
+          if result.status == "empty":
+              print("A-share live smoke returned empty data; this is not accepted for a scheduled trading-day smoke.", file=sys.stderr)
+              sys.exit(3)
+          if result.status == "stale":
+              print("A-share live smoke returned stale cache; live provider path is not healthy.", file=sys.stderr)
+              sys.exit(4)
+          if result.status not in {"ok", "partial"}:
               sys.exit(2)
+          print(f"A-share live smoke partial coverage too low: {coverage_ratio}", file=sys.stderr)
+          sys.exit(5)
           PY
 
       - name: Upload live smoke logs

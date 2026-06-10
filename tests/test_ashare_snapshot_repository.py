@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
-import unittest
 import sqlite3
 import tempfile
+import unittest
 from datetime import datetime
+from unittest.mock import patch
 
 from sqlalchemy import select
 from sqlalchemy.sql import func
@@ -143,78 +144,7 @@ class AShareSnapshotRepositoryTestCase(unittest.TestCase):
         DatabaseManager.reset_instance()
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = f"{temp_dir}/legacy.db"
-            connection = sqlite3.connect(db_path)
-            try:
-                connection.execute(
-                    """
-                    CREATE TABLE ashare_intelligence_snapshot (
-                        id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                        snapshot_id VARCHAR(64) NOT NULL UNIQUE,
-                        snapshot_type VARCHAR(64) NOT NULL,
-                        trade_date DATE NOT NULL,
-                        as_of DATETIME NOT NULL,
-                        as_of_bucket VARCHAR(64) NOT NULL,
-                        run_id VARCHAR(64),
-                        provider_set VARCHAR(128) NOT NULL,
-                        is_final BOOLEAN NOT NULL,
-                        revision INTEGER NOT NULL,
-                        coverage_ratio FLOAT,
-                        payload_json TEXT NOT NULL,
-                        schema_version VARCHAR(32) NOT NULL,
-                        source_hash VARCHAR(64) NOT NULL,
-                        config_hash VARCHAR(64),
-                        generated_at DATETIME NOT NULL,
-                        CONSTRAINT uix_ashare_snapshot_slot UNIQUE (
-                            snapshot_type,
-                            trade_date,
-                            as_of_bucket,
-                            schema_version,
-                            provider_set
-                        )
-                    )
-                    """
-                )
-                connection.execute(
-                    """
-                    INSERT INTO ashare_intelligence_snapshot (
-                        snapshot_id,
-                        snapshot_type,
-                        trade_date,
-                        as_of,
-                        as_of_bucket,
-                        run_id,
-                        provider_set,
-                        is_final,
-                        revision,
-                        coverage_ratio,
-                        payload_json,
-                        schema_version,
-                        source_hash,
-                        config_hash,
-                        generated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        "legacy-1",
-                        "sector_fund_flow",
-                        "2026-06-08",
-                        "2026-06-08 10:00:00",
-                        "2026-06-08-api",
-                        "run-1",
-                        "custom,astock_data",
-                        0,
-                        1,
-                        0.5,
-                        '{"status":"ok","rows":[1]}',
-                        "v1",
-                        "hash-1",
-                        "cfg-1",
-                        "2026-06-08 10:01:00",
-                    ),
-                )
-                connection.commit()
-            finally:
-                connection.close()
+            _create_legacy_snapshot_db(db_path)
 
             migrated_db = DatabaseManager(db_url=f"sqlite:///{db_path}")
             repo = AShareSnapshotRepository(migrated_db)
@@ -247,8 +177,189 @@ class AShareSnapshotRepositoryTestCase(unittest.TestCase):
             self.assertEqual(migrated.provider_set, "astock_data,custom")
             self.assertIsNotNone(migrated.provider_set_json)
             self.assertIsNotNone(migrated.provider_set_hash)
+            self.assertEqual(_legacy_snapshot_row_count(db_path), 1)
 
         DatabaseManager.reset_instance()
+
+    def test_legacy_sqlite_snapshot_migration_preserves_data_when_create_fails(self) -> None:
+        DatabaseManager.reset_instance()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = f"{temp_dir}/legacy-create-fail.db"
+            _create_legacy_snapshot_db(db_path)
+
+            with patch.object(
+                DatabaseManager,
+                "_create_ashare_snapshot_table_for_migration",
+                side_effect=RuntimeError("create failed"),
+            ):
+                with self.assertRaises(RuntimeError):
+                    DatabaseManager(db_url=f"sqlite:///{db_path}")
+
+            self.assertEqual(_snapshot_table_row_count(db_path), 1)
+            self.assertEqual(_legacy_snapshot_row_count(db_path), 0)
+
+        DatabaseManager.reset_instance()
+
+    def test_legacy_sqlite_snapshot_migration_preserves_data_when_normalize_fails(self) -> None:
+        DatabaseManager.reset_instance()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = f"{temp_dir}/legacy-normalize-fail.db"
+            _create_legacy_snapshot_db(db_path)
+
+            with patch.object(
+                DatabaseManager,
+                "_normalize_ashare_snapshot_row",
+                side_effect=RuntimeError("normalize failed"),
+            ):
+                with self.assertRaises(RuntimeError):
+                    DatabaseManager(db_url=f"sqlite:///{db_path}")
+
+            self.assertEqual(_snapshot_table_row_count(db_path), 1)
+            self.assertEqual(_legacy_snapshot_row_count(db_path), 0)
+
+        DatabaseManager.reset_instance()
+
+    def test_legacy_sqlite_snapshot_migration_preserves_data_when_insert_conflicts(self) -> None:
+        DatabaseManager.reset_instance()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = f"{temp_dir}/legacy-conflict.db"
+            _create_legacy_snapshot_db(db_path, include_unique_slot=False)
+            _insert_legacy_snapshot_row(db_path, snapshot_id="legacy-2", run_id="run-duplicate")
+
+            with self.assertRaises(Exception):
+                DatabaseManager(db_url=f"sqlite:///{db_path}")
+
+            self.assertEqual(_snapshot_table_row_count(db_path), 2)
+            self.assertEqual(_legacy_snapshot_row_count(db_path), 0)
+
+        DatabaseManager.reset_instance()
+
+
+def _create_legacy_snapshot_db(db_path: str, *, include_unique_slot: bool = True) -> None:
+    connection = sqlite3.connect(db_path)
+    unique_clause = (
+        """
+        , CONSTRAINT uix_ashare_snapshot_slot UNIQUE (
+            snapshot_type,
+            trade_date,
+            as_of_bucket,
+            schema_version,
+            provider_set
+        )
+        """
+        if include_unique_slot
+        else ""
+    )
+    try:
+        connection.execute(
+            f"""
+            CREATE TABLE ashare_intelligence_snapshot (
+                id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                snapshot_id VARCHAR(64) NOT NULL UNIQUE,
+                snapshot_type VARCHAR(64) NOT NULL,
+                trade_date DATE NOT NULL,
+                as_of DATETIME NOT NULL,
+                as_of_bucket VARCHAR(64) NOT NULL,
+                run_id VARCHAR(64),
+                provider_set VARCHAR(128) NOT NULL,
+                is_final BOOLEAN NOT NULL,
+                revision INTEGER NOT NULL,
+                coverage_ratio FLOAT,
+                payload_json TEXT NOT NULL,
+                schema_version VARCHAR(32) NOT NULL,
+                source_hash VARCHAR(64) NOT NULL,
+                config_hash VARCHAR(64),
+                generated_at DATETIME NOT NULL
+                {unique_clause}
+            )
+            """
+        )
+        _insert_legacy_snapshot_row(db_path, connection=connection)
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _insert_legacy_snapshot_row(
+    db_path: str,
+    *,
+    connection: sqlite3.Connection | None = None,
+    snapshot_id: str = "legacy-1",
+    run_id: str = "run-1",
+) -> None:
+    owns_connection = connection is None
+    connection = connection or sqlite3.connect(db_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO ashare_intelligence_snapshot (
+                snapshot_id,
+                snapshot_type,
+                trade_date,
+                as_of,
+                as_of_bucket,
+                run_id,
+                provider_set,
+                is_final,
+                revision,
+                coverage_ratio,
+                payload_json,
+                schema_version,
+                source_hash,
+                config_hash,
+                generated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                snapshot_id,
+                "sector_fund_flow",
+                "2026-06-08",
+                "2026-06-08 10:00:00",
+                "2026-06-08-api",
+                run_id,
+                "custom,astock_data",
+                0,
+                1,
+                0.5,
+                '{"status":"ok","rows":[1]}',
+                "v1",
+                "hash-1",
+                "cfg-1",
+                "2026-06-08 10:01:00",
+            ),
+        )
+        if owns_connection:
+            connection.commit()
+    finally:
+        if owns_connection:
+            connection.close()
+
+
+def _snapshot_table_row_count(db_path: str) -> int:
+    return _table_row_count(db_path, "ashare_intelligence_snapshot")
+
+
+def _legacy_snapshot_row_count(db_path: str) -> int:
+    connection = sqlite3.connect(db_path)
+    try:
+        names = [
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ashare_intelligence_snapshot__legacy_%'"
+            ).fetchall()
+        ]
+        return sum(_table_row_count(db_path, name) for name in names)
+    finally:
+        connection.close()
+
+
+def _table_row_count(db_path: str, table_name: str) -> int:
+    connection = sqlite3.connect(db_path)
+    try:
+        row = connection.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+        return int(row[0])
+    finally:
+        connection.close()
 
 
 if __name__ == "__main__":

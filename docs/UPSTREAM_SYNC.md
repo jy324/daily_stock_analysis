@@ -2,6 +2,19 @@
 
 本文记录 `feat/ashare-intelligence-foundation` 在 A 股情报收敛工作中的本地同步基线。这里的 ref 状态来自当前工作区本地 Git refs；本次没有在含有未提交改动的工作树上执行 rebase 或 merge。
 
+## 2026-06-10 P0 readiness 基线
+
+- DSA 工作分支：`fix/ashare-p0-readiness`
+- DSA 基线 HEAD：`ed68847f`
+- `a-stock-data` 工作分支：`fix/astock-data-default-providers`
+- `a-stock-data` provider commit：`da8bcb3faf924d9bf1eed01d319967039c36fec2`
+- `requirements.txt` 已固定到上述完整 SHA，不依赖可移动 branch 或 tag。
+- `a-stock-data` 已提供 `AStockDataClient.from_defaults()`，默认装配 Eastmoney/Cninfo provider，覆盖板块资金、个股资金、龙虎榜、解禁和公告 capability。
+- DSA adapter 会优先调用 `AStockDataClient.from_defaults()`；旧版 package 仍可回退到无参构造，但会保持 provider 未配置语义。
+- SQLite snapshot schema 迁移使用显式 `BEGIN IMMEDIATE`，成功后保留 `ashare_intelligence_snapshot__legacy_*`，失败 rollback 后旧表保持原名和原数据。
+- A 股 live smoke 不再使用 `continue-on-error: true`，provider unavailable、stale、empty 或低覆盖 partial 会让 workflow 失败，artifact 仍始终上传。
+- Docker healthcheck 不再用 `sys.exit(0)` 伪造健康。
+
 ## 2026-06-09 A 股情报收敛基线
 
 - 工作分支：`feat/ashare-intelligence-foundation`

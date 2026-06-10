@@ -36,6 +36,14 @@ def test_dockerfile_bundles_default_alphasift_adapter() -> None:
     assert "import alphasift.dsa_adapter" in dockerfile
 
 
+def test_dockerfile_healthcheck_does_not_force_success() -> None:
+    dockerfile = (REPO_ROOT / "docker" / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "HEALTHCHECK" in dockerfile
+    assert 'sys.exit(0)' not in dockerfile
+    assert "curl -f http://localhost:8000/api/health" in dockerfile
+
+
 def test_docker_entrypoint_repairs_ownership_and_user_permissions() -> None:
     entrypoint = (REPO_ROOT / "docker" / "entrypoint.sh").read_text(encoding="utf-8")
 

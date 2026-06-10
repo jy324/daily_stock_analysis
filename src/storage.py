@@ -1074,6 +1074,24 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             )
             '''
         )
+        DatabaseManager._create_ashare_snapshot_indexes_for_migration(connection)
+
+    @staticmethod
+    def _create_ashare_snapshot_indexes_for_migration(connection) -> None:
+        """Recreate the ORM-defined secondary indexes inside the migration transaction.
+
+        The table DDL above only declares the UNIQUE constraints. The model also
+        defines per-column (`index=True`) and composite (`Index(...)`) indexes;
+        compile them straight from the ORM definition so a migrated database keeps
+        the same index set as a fresh ``create_all`` install and cannot drift.
+        """
+        from sqlalchemy.schema import CreateIndex
+
+        dialect = connection.dialect
+        for index in AShareIntelligenceSnapshot.__table__.indexes:
+            ddl = str(CreateIndex(index).compile(dialect=dialect)).strip()
+            if ddl:
+                connection.exec_driver_sql(ddl)
 
     def _backfill_ashare_snapshot_provider_set(self, connection, table_name: str) -> None:
         rows = self._read_sqlite_table_rows(connection, table_name)

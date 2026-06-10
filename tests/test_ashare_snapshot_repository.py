@@ -181,6 +181,25 @@ class AShareSnapshotRepositoryTestCase(unittest.TestCase):
 
         DatabaseManager.reset_instance()
 
+    def test_legacy_sqlite_snapshot_migration_recreates_orm_indexes(self) -> None:
+        DatabaseManager.reset_instance()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = f"{temp_dir}/legacy-indexes.db"
+            _create_legacy_snapshot_db(db_path)
+
+            DatabaseManager(db_url=f"sqlite:///{db_path}")
+
+            expected = {index.name for index in AShareIntelligenceSnapshot.__table__.indexes}
+            actual = _snapshot_table_index_names(db_path)
+            missing = expected - actual
+            self.assertEqual(
+                missing,
+                set(),
+                f"migrated table missing ORM indexes: {sorted(missing)}",
+            )
+
+        DatabaseManager.reset_instance()
+
     def test_legacy_sqlite_snapshot_migration_preserves_data_when_create_fails(self) -> None:
         DatabaseManager.reset_instance()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -337,6 +356,17 @@ def _insert_legacy_snapshot_row(
 
 def _snapshot_table_row_count(db_path: str) -> int:
     return _table_row_count(db_path, "ashare_intelligence_snapshot")
+
+
+def _snapshot_table_index_names(db_path: str) -> set:
+    connection = sqlite3.connect(db_path)
+    try:
+        rows = connection.execute(
+            "PRAGMA index_list('ashare_intelligence_snapshot')"
+        ).fetchall()
+        return {str(row[1]) for row in rows}
+    finally:
+        connection.close()
 
 
 def _legacy_snapshot_row_count(db_path: str) -> int:

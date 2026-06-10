@@ -60,6 +60,62 @@ class DecisionSignalRepository:
         finally:
             session.close()
 
+    _TERMINAL_STATES = ("target_hit", "stop_hit", "expired", "invalidated")
+
+    def get_active_signals(self, limit: int = 1000) -> list:
+        """Return non-terminal signals (candidates for daily advancement)."""
+        session = self.db.get_session()
+        try:
+            rows = session.execute(
+                select(DecisionSignalRecord)
+                .where(DecisionSignalRecord.state.notin_(self._TERMINAL_STATES))
+                .order_by(DecisionSignalRecord.id.asc())
+                .limit(limit)
+            ).scalars().all()
+            for row in rows:
+                session.expunge(row)
+            return list(rows)
+        finally:
+            session.close()
+
+    def update_lifecycle(
+        self,
+        signal_id: int,
+        *,
+        state: Optional[str] = None,
+        entered_date=None,
+        entered_price: Optional[float] = None,
+        closed_date=None,
+        closed_price: Optional[float] = None,
+        history_entry: Optional[dict] = None,
+    ) -> None:
+        """Update lifecycle fields and append one entry to the state history."""
+        session = self.db.get_session()
+        try:
+            row = session.get(DecisionSignalRecord, signal_id)
+            if row is None:
+                return
+            if state is not None:
+                row.state = state
+            if entered_date is not None:
+                row.entered_date = entered_date
+            if entered_price is not None:
+                row.entered_price = entered_price
+            if closed_date is not None:
+                row.closed_date = closed_date
+            if closed_price is not None:
+                row.closed_price = closed_price
+            if history_entry is not None:
+                history = json.loads(row.state_history_json or "[]")
+                history.append(history_entry)
+                row.state_history_json = json.dumps(history, ensure_ascii=False)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
     def get_latest_for_analysis(self, analysis_history_id: int) -> Optional[DecisionSignalRecord]:
         """Return the highest-version signal for an analysis, or ``None``."""
         session = self.db.get_session()

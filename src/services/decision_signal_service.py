@@ -8,12 +8,19 @@ cohesive service.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from src.repositories.decision_signal_repo import DecisionSignalRepository
 from src.schemas.decision_signal import DecisionSignal, build_signal_from_analysis_fields
+
+logger = logging.getLogger(__name__)
+
+# A callable that returns one day's OHLC for a code, or ``None`` if unavailable
+# (e.g. suspended/halted). Decouples advancement from the data-fetching layer.
+OhlcProvider = Callable[[str, date], Optional[Mapping[str, float]]]
 
 
 # --- Lifecycle state machine (B.2) ---------------------------------------------
@@ -145,6 +152,59 @@ def advance_signal_for_day(
 
     # short / neutral signals have no entry simulation in a long-only system
     return SignalAdvance()
+
+
+def advance_active_signals(
+    db: Any,
+    *,
+    today: date,
+    ohlc_provider: OhlcProvider,
+    repo: Optional[DecisionSignalRepository] = None,
+) -> Dict[str, int]:
+    """Advance every active (non-terminal) signal by one trading day.
+
+    Each signal is advanced independently: a fetch/advance failure for one signal
+    is logged and isolated so the rest still progress. Returns a summary with
+    ``scanned`` / ``transitioned`` / ``errors`` counts.
+    """
+    repo = repo or DecisionSignalRepository(db)
+    summary = {"scanned": 0, "transitioned": 0, "errors": 0}
+
+    for record in repo.get_active_signals():
+        summary["scanned"] += 1
+        try:
+            signal = record.to_signal()
+            ohlc = ohlc_provider(record.code, today)
+            advance = advance_signal_for_day(signal, day=today, ohlc=ohlc)
+            if advance.to_state is None:
+                continue
+
+            SignalStateMachine.assert_transition(record.state, advance.to_state)
+            repo.update_lifecycle(
+                record.id,
+                state=advance.to_state,
+                entered_date=today if advance.entered_price is not None else None,
+                entered_price=advance.entered_price,
+                closed_date=today if advance.closed_price is not None else None,
+                closed_price=advance.closed_price,
+                history_entry={
+                    "from": record.state,
+                    "to": advance.to_state,
+                    "day": today.isoformat(),
+                    "reason": advance.reason,
+                },
+            )
+            summary["transitioned"] += 1
+        except Exception as exc:  # isolate per-signal failures
+            summary["errors"] += 1
+            logger.warning(
+                "决策信号推进失败 (id=%s, code=%s): %s",
+                getattr(record, "id", None),
+                getattr(record, "code", None),
+                exc,
+            )
+
+    return summary
 
 
 def generate_and_persist_signal(

@@ -1,0 +1,80 @@
+name: A-share Intelligence Live Smoke
+
+on:
+  schedule:
+    - cron: '30 7 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: ashare-live-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run A-share provider live smoke
+        continue-on-error: true
+        env:
+          ASHARE_INTELLIGENCE_ENABLED: "true"
+          ASHARE_PROVIDER_PRIORITY: "astock_data"
+          ASHARE_CACHE_DIR: ${{ runner.temp }}/ashare-cache
+          ASHARE_CACHE_MAX_FILES: "100"
+          ASHARE_CONFIG_FILE: config/ashare_intelligence.yaml
+        run: |
+          python - <<'PY' | tee ashare-live-smoke.json
+          import json
+          import sys
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          from src.config import Config
+          from data_provider.intelligence.manager import AShareIntelligenceManager
+
+          Config.reset_instance()
+          config = Config.get_instance()
+          trade_date = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+          manager = AShareIntelligenceManager(config)
+          result = manager.get_capability(
+              "sector_fund_flow",
+              trade_date=trade_date,
+              as_of_bucket=f"{trade_date}-live-smoke",
+              limit=3,
+              refresh=True,
+          )
+          payload = {
+              "capability": result.capability,
+              "provider": result.provider,
+              "status": result.status,
+              "trade_date": trade_date,
+              "coverage": result.coverage,
+              "source": result.source.model_dump(mode="json") if result.source else None,
+          }
+          print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+          if result.status not in {"ok", "partial", "empty", "stale"}:
+              sys.exit(2)
+          PY
+
+      - name: Upload live smoke logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ashare-live-smoke-${{ github.run_number }}
+          path: ashare-live-smoke.json
+          if-no-files-found: ignore

@@ -117,6 +117,21 @@ class AShareIntelligenceApiTestCase(unittest.TestCase):
         self.assertEqual(response.json()["error"], "future_trade_date")
         call.assert_not_called()
 
+    def test_stock_endpoint_rejects_non_trading_day(self) -> None:
+        temp_dir, client = _client()
+        try:
+            with patch.dict(os.environ, {"ASHARE_INTELLIGENCE_ENABLED": "true"}, clear=True):
+                Config.reset_instance()
+                with patch.object(AShareIntelligenceService, "get_capability") as call, \
+                        patch("api.v1.endpoints.ashare_intelligence.is_market_open", return_value=False):
+                    response = client.get("/api/v1/stocks/600519/capital-flow?trade_date=2026-06-08")
+        finally:
+            temp_dir.cleanup()
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["error"], "non_trading_day")
+        call.assert_not_called()
+
     def test_stock_capital_flow_endpoint_returns_partial_status_from_service(self) -> None:
         temp_dir, client = _client()
         partial = _result("partial")

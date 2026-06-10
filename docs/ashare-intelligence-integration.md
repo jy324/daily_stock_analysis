@@ -47,6 +47,7 @@ A 股情报路由默认注册，但运行时门禁：
 - `POST /api/v1/market/ashare/review`
 
 `sector-flow` 的 `limit` 硬上限为 50，`capital-flow` 和 `risk-events` 的 `lookback` 硬上限为 120。默认日期按 `Asia/Shanghai` 解析；显式 `trade_date` 必须是合法 `YYYY-MM-DD`，未来日期返回 `422 future_trade_date`。`refresh=true` 只透传 service，不绕过 feature gate、provider dependency 检查或 provider 限流。
+显式 `trade_date` 还会复用现有 A 股交易日历校验；非交易日返回 `422 non_trading_day`。交易日历依赖不可用时沿用现有 fail-open 语义。
 
 `risk-events` 聚合公告、解禁和个股龙虎榜结构化记录，统一输出 `announcement`、`lockup_expiry`、`dragon_tiger` taxonomy，并按公告 ID、规范化 URL、标题 hash、`code+date+event_type` 去重。解禁等可能来自全市场列表的数据会按请求股票代码严格过滤。全部来源不可用时返回 `503 provider_unavailable`；部分来源成功时返回 `200 status=partial`。
 
@@ -70,7 +71,7 @@ DSA runtime skills 位于 `strategies/ashare_*/SKILL.md`，默认不激活、不
 
 Web 新增 `capabilitiesApi.getCapabilities()`，从 `GET /api/v1/capabilities` 读取运行时能力，不通过 snapshot/data endpoint 探测功能可用性。
 
-大盘复盘详情将 `ashare_capital_evidence` section 从正文解读中抽出，放入默认折叠的“输入证据”区域；`llm_interpretation` 保持在正文 sections 中。
+大盘复盘详情将 `ashare_capital_evidence` section 从正文解读中抽出，放入默认折叠的“输入证据”区域；`llm_interpretation` 保持在正文 sections 中。若 payload 包含 `ashare_intelligence.capital_evidence`，Web 会展示 status、provider、as_of、cache、coverage、snapshot_id、revision 和 warnings 等证据元数据，避免只呈现 Markdown 表格。
 
 ## Provider 边界
 
@@ -91,6 +92,10 @@ DB snapshot 使用 append-only repository。逻辑槽位由 `(snapshot_type, tra
 开启后，市场复盘在 LLM 生成前获取一次 `sector_fund_flow` 证据，并将压缩摘要注入 prompt；结构化 payload、Markdown section 和历史快照复用同一份证据，不在 `build_market_review_payload()` 阶段再次请求 provider。payload 可追加 `ashare_intelligence.capital_evidence`，并将资金情绪拆成固定 section：`ashare_capital_evidence`（程序生成的客观数据表）和 `llm_interpretation`（LLM 对同一份证据的解释）。程序只格式化 provider 返回的金额和排名，不让 LLM 计算金额、排名或持续性；`partial`、`stale`、`empty`、`unavailable` 状态会保留在证据表中。
 
 `a-stock-data/SKILL.md` 后续应收敛为薄说明层，只指导调用 `astock_data` package，不承载运行时复制或 `exec` 的网络代码。
+
+## Live Smoke
+
+`.github/workflows/ashare-live-smoke.yml` 是观测型 workflow，工作日定时和手动触发。它安装 `requirements.txt` 中固定 SHA 的 `a-stock-data`，开启 A 股情报 gate，并通过 `AShareIntelligenceManager` 真实调用 `sector_fund_flow` provider path，输出 `ashare-live-smoke.json` artifact。该 workflow 的 provider 调用 step `continue-on-error: true`，不会阻断主 CI；在真实 provider 尚未落地或上游不可用时会通过 step failure 暴露 `unavailable` 状态。
 
 ## 评分边界
 

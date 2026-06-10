@@ -115,6 +115,24 @@ const ashareEvidencePayload: MarketReviewPayload = {
       markdown: 'LLM 解读内容。',
     },
   ],
+  ashareIntelligence: {
+    capitalEvidence: {
+      capability: 'sector_fund_flow',
+      provider: 'astock_data',
+      status: 'partial',
+      coverage: { coverageRatio: 0.8 },
+      cacheHit: false,
+      cacheSource: 'provider',
+      snapshotId: 'snap-1',
+      snapshotRevision: 2,
+      source: {
+        provider: 'astock_data',
+        status: 'partial',
+        asOf: '2026-06-08T15:00:00+08:00',
+      },
+      warnings: ['sector_fund_flow partial'],
+    },
+  },
 };
 
 describe('MarketReviewReportView', () => {
@@ -205,6 +223,15 @@ describe('MarketReviewReportView', () => {
     );
 
     expect(screen.getByText('输入证据')).toBeInTheDocument();
+    expect(screen.getByText('证据元数据')).toBeInTheDocument();
+    expect(screen.getByText(/status/)).toBeInTheDocument();
+    expect(screen.getAllByText(/partial/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/provider/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/astock_data/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/80%/)).toBeInTheDocument();
+    expect(screen.getByText(/snap-1/)).toBeInTheDocument();
+    expect(screen.getByText(/revision/)).toBeInTheDocument();
+    expect(screen.getByText(/sector_fund_flow partial/)).toBeInTheDocument();
     expect(screen.getByText('资金与情绪：客观数据')).toBeInTheDocument();
     expect(screen.getByText('资金与情绪：分析解读')).toBeInTheDocument();
     expect(screen.queryByTestId('market-review-report')?.textContent).not.toContain('资金与情绪：客观数据');

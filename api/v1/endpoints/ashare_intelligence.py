@@ -25,6 +25,7 @@ from src.core.market_review_lock import (
     release_market_review_lock as _release_market_review_lock,
     try_acquire_market_review_lock as _try_acquire_market_review_lock,
 )
+from src.core.trading_calendar import is_market_open
 from src.report_language import normalize_report_language
 from src.schemas.ashare_intelligence import AShareIntelligenceResult
 from src.services.ashare_intelligence_service import AShareIntelligenceService
@@ -292,6 +293,14 @@ def _resolve_ashare_trade_date(trade_date: Optional[str]) -> str:
             detail={
                 "error": "future_trade_date",
                 "message": "trade_date cannot be in the future.",
+            },
+        )
+    if not is_market_open("cn", parsed):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "non_trading_day",
+                "message": "trade_date is not an A-share trading day.",
             },
         )
     return parsed.isoformat()

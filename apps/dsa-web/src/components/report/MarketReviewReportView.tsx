@@ -7,6 +7,7 @@ import type {
   MarketReviewPayload,
   MarketReviewPayloadSection,
   ReportLanguage,
+  AshareCapitalEvidence,
 } from '../../types/analysis';
 import { markdownToPlainText } from '../../utils/markdown';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
@@ -43,6 +44,11 @@ type StructuredMarketData = {
   title?: string;
   breadth?: MarketReviewPayload['breadth'];
   indices: NonNullable<MarketReviewPayload['indices']>;
+};
+type EvidenceMetadata = {
+  id: string;
+  label: string;
+  value: string;
 };
 
 const isMarketReviewPayload = (value: unknown): value is MarketReviewPayload =>
@@ -193,6 +199,64 @@ const getInputEvidenceSections = (payload?: MarketReviewPayload | null): MarketR
     }));
 };
 
+const formatMetadataValue = (value: unknown): string => {
+  if (value === undefined || value === null || value === '') {
+    return '';
+  }
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false';
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? String(value) : '';
+  }
+  return String(value);
+};
+
+const getAshareCapitalEvidence = (payload?: MarketReviewPayload | null): AshareCapitalEvidence | null => {
+  if (!payload) {
+    return null;
+  }
+  if (payload.markets) {
+    for (const marketPayload of Object.values(payload.markets)) {
+      const evidence = getAshareCapitalEvidence(marketPayload);
+      if (evidence) {
+        return evidence;
+      }
+    }
+    return null;
+  }
+  return payload.ashareIntelligence?.capitalEvidence || null;
+};
+
+const getAshareEvidenceMetadata = (payload?: MarketReviewPayload | null): EvidenceMetadata[] => {
+  const evidence = getAshareCapitalEvidence(payload);
+  if (!evidence) {
+    return [];
+  }
+  const coverageRatio = evidence.coverage?.coverageRatio;
+  const entries: EvidenceMetadata[] = [
+    { id: 'status', label: 'status', value: formatMetadataValue(evidence.status) },
+    { id: 'provider', label: 'provider', value: formatMetadataValue(evidence.provider || evidence.source?.provider) },
+    { id: 'as-of', label: 'as_of', value: formatMetadataValue(evidence.source?.asOf) },
+    { id: 'cache', label: 'cache', value: evidence.cacheSource ? formatMetadataValue(evidence.cacheSource) : formatMetadataValue(evidence.cacheHit ? 'hit' : 'provider') },
+    {
+      id: 'coverage',
+      label: 'coverage',
+      value: typeof coverageRatio === 'number' ? `${Math.round(coverageRatio * 100)}%` : '',
+    },
+    { id: 'snapshot', label: 'snapshot', value: formatMetadataValue(evidence.snapshotId) },
+    { id: 'revision', label: 'revision', value: formatMetadataValue(evidence.snapshotRevision) },
+  ];
+  const warnings = Array.isArray(evidence.warnings) ? evidence.warnings.filter(Boolean).join('; ') : '';
+  if (warnings) {
+    entries.push({ id: 'warnings', label: 'warnings', value: warnings });
+  }
+  if (evidence.staleReason) {
+    entries.push({ id: 'stale-reason', label: 'stale', value: evidence.staleReason });
+  }
+  return entries.filter((entry) => entry.value);
+};
+
 const hasStructuredMarketData = (payload?: MarketReviewPayload | null): boolean =>
   Boolean(payload?.breadth || payload?.indices?.length);
 
@@ -243,6 +307,7 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   change: string;
   highLow: string;
   inputEvidence: string;
+  evidenceMetadata: string;
 }> = {
   zh: {
     reviewSummary: '复盘摘要',
@@ -263,6 +328,7 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     change: '涨跌幅',
     highLow: '高/低',
     inputEvidence: '输入证据',
+    evidenceMetadata: '证据元数据',
   },
   en: {
     reviewSummary: 'Review Summary',
@@ -283,6 +349,7 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     change: 'Change',
     highLow: 'High/Low',
     inputEvidence: 'Input Evidence',
+    evidenceMetadata: 'Evidence Metadata',
   },
 };
 
@@ -327,6 +394,10 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
   );
   const inputEvidenceSections = useMemo(
     () => getInputEvidenceSections(marketReviewPayload),
+    [marketReviewPayload],
+  );
+  const inputEvidenceMetadata = useMemo(
+    () => getAshareEvidenceMetadata(marketReviewPayload),
     [marketReviewPayload],
   );
   const showStructuredMarketTitles = Boolean(marketReviewPayload?.markets);
@@ -578,6 +649,21 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                   <ChevronDown className="ml-auto h-4 w-4 text-secondary-text" aria-hidden="true" />
                 </summary>
                 <div className="mt-4 space-y-4">
+                  {inputEvidenceMetadata.length > 0 ? (
+                    <div>
+                      <p className="label-uppercase mb-2">{marketReviewText.evidenceMetadata}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {inputEvidenceMetadata.map((item) => (
+                          <span
+                            key={item.id}
+                            className="rounded-lg border border-subtle px-2.5 py-1 text-xs text-secondary-text"
+                          >
+                            <span className="font-semibold text-foreground">{item.label}</span>: {item.value}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   {inputEvidenceSections.map(({ id, title, content: evidenceContent }) => (
                     <div key={id} className="rounded-lg border border-subtle p-3">
                       <h4 className="mb-2 text-sm font-semibold text-foreground">{title}</h4>

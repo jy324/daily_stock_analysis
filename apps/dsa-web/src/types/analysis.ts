@@ -137,6 +137,38 @@ export interface MarketReviewPayloadSection {
   markdown: string;
 }
 
+export interface AshareCapitalEvidenceSource {
+  provider?: string | null;
+  status?: string | null;
+  asOf?: string | null;
+  fetchedAt?: string | null;
+  error?: string | null;
+  isPartial?: boolean | null;
+}
+
+export interface AshareCapitalEvidence {
+  capability?: string;
+  provider?: string | null;
+  status?: string | null;
+  coverage?: {
+    coverageRatio?: number | null;
+    [key: string]: unknown;
+  };
+  cacheHit?: boolean | null;
+  cacheSource?: string | null;
+  snapshotId?: string | null;
+  snapshotRevision?: number | null;
+  source?: AshareCapitalEvidenceSource | null;
+  warnings?: string[];
+  staleReason?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AshareIntelligencePayload {
+  capitalEvidence?: AshareCapitalEvidence | null;
+  [key: string]: unknown;
+}
+
 export interface MarketReviewIndex {
   code: string;
   name: string;
@@ -177,7 +209,7 @@ export interface MarketReviewPayload {
   sectors?: SectorRankings;
   news?: Array<Record<string, unknown>>;
   sections?: MarketReviewPayloadSection[];
-  ashareIntelligence?: Record<string, unknown>;
+  ashareIntelligence?: AshareIntelligencePayload;
   markets?: Record<string, MarketReviewPayload>;
   markdownReport?: string;
 }

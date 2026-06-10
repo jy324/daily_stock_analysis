@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] A 股情报新增 runtime skills 与风险事件 Agent 工具，`.claude/skills` 明确保留为开发辅助入口。
 - [文档] 新增 A 股情报分支 upstream sync 基线记录，明确当前 HEAD、相对 `origin/main` 差异、数据库 schema baseline 与未执行 rebase 的边界。
 - [修复] A 股大盘复盘 `Idempotency-Key` 新增请求体 hash 冲突检测，相同 key 不同 body 返回 `409 idempotency_conflict`，并为 A 股 Agent 工具启用请求级查询预算。
+- [改进] A 股情报固定 `a-stock-data` 完整 commit SHA 依赖，snapshot 改为 append-only revision，provider manager 增加 single-flight、多 provider fallback、损坏缓存隔离和容量清理，并补充 API `trade_date` 格式/未来日期校验。
 
 ## [3.21.0] - 2026-06-07
 

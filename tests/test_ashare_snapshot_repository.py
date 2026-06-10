@@ -61,7 +61,7 @@ class AShareSnapshotRepositoryTestCase(unittest.TestCase):
         self.assertEqual(found["source_hash"], saved.source_hash)
         self.assertEqual(found["generated_at"].date(), datetime.now().date())
 
-    def test_same_unique_snapshot_slot_updates_revision(self) -> None:
+    def test_same_snapshot_slot_appends_revision(self) -> None:
         first = self.repo.save_snapshot(
             snapshot_type="dragon_tiger_market",
             trade_date="2026-06-08",
@@ -102,14 +102,14 @@ class AShareSnapshotRepositoryTestCase(unittest.TestCase):
             provider_set="astock_data",
         )
 
-        self.assertEqual(count, 1)
-        self.assertEqual(first.snapshot_id, second.snapshot_id)
+        self.assertEqual(count, 2)
+        self.assertNotEqual(first.snapshot_id, second.snapshot_id)
         self.assertEqual(second.revision, 2)
         self.assertEqual(found["revision"], 2)
         self.assertEqual(found["payload"]["status"], "partial")
         self.assertEqual(found["run_id"], "run-2")
 
-    def test_provider_set_is_part_of_unique_snapshot_slot(self) -> None:
+    def test_provider_set_order_is_normalized_for_snapshot_slot(self) -> None:
         base_kwargs = {
             "snapshot_type": "announcements",
             "trade_date": "2026-06-08",
@@ -123,8 +123,8 @@ class AShareSnapshotRepositoryTestCase(unittest.TestCase):
             "config_hash": "cfg-1",
         }
 
-        self.repo.save_snapshot(provider_set="astock_data", **base_kwargs)
-        self.repo.save_snapshot(provider_set="custom,astock_data", **base_kwargs)
+        first = self.repo.save_snapshot(provider_set="astock_data,custom", **base_kwargs)
+        second = self.repo.save_snapshot(provider_set="custom,astock_data", **base_kwargs)
 
         with self.db.get_session() as session:
             count = session.execute(
@@ -132,6 +132,10 @@ class AShareSnapshotRepositoryTestCase(unittest.TestCase):
             ).scalar_one()
 
         self.assertEqual(count, 2)
+        self.assertEqual(first.provider_set, "astock_data,custom")
+        self.assertEqual(second.provider_set, "astock_data,custom")
+        self.assertEqual(first.provider_set_hash, second.provider_set_hash)
+        self.assertEqual(second.revision, 2)
 
 
 if __name__ == "__main__":

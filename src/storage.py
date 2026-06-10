@@ -235,6 +235,8 @@ class AShareIntelligenceSnapshot(Base):
     as_of_bucket = Column(String(64), nullable=False, index=True)
     run_id = Column(String(64), index=True)
     provider_set = Column(String(128), nullable=False, index=True)
+    provider_set_json = Column(Text)
+    provider_set_hash = Column(String(64), index=True)
     is_final = Column(Boolean, default=False, nullable=False)
     revision = Column(Integer, default=1, nullable=False)
     coverage_ratio = Column(Float)
@@ -250,7 +252,8 @@ class AShareIntelligenceSnapshot(Base):
             'trade_date',
             'as_of_bucket',
             'schema_version',
-            'provider_set',
+            'provider_set_hash',
+            'revision',
             name='uix_ashare_snapshot_slot',
         ),
         Index(
@@ -259,7 +262,8 @@ class AShareIntelligenceSnapshot(Base):
             'trade_date',
             'as_of_bucket',
             'schema_version',
-            'provider_set',
+            'provider_set_hash',
+            'revision',
         ),
     )
 

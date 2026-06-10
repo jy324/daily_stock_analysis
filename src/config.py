@@ -644,6 +644,7 @@ class Config:
     ashare_intelligence_enabled: bool = False
     ashare_provider_priority: str = "astock_data"
     ashare_cache_dir: str = "./data/ashare_cache"
+    ashare_cache_max_files: int = 1000
     ashare_config_file: str = "config/ashare_intelligence.yaml"
     ashare_scoring_enabled: bool = False
 
@@ -1826,6 +1827,12 @@ class Config:
             ),
             ashare_provider_priority=os.getenv('ASHARE_PROVIDER_PRIORITY', 'astock_data').strip() or 'astock_data',
             ashare_cache_dir=os.getenv('ASHARE_CACHE_DIR', './data/ashare_cache').strip() or './data/ashare_cache',
+            ashare_cache_max_files=parse_env_int(
+                os.getenv('ASHARE_CACHE_MAX_FILES'),
+                1000,
+                field_name='ASHARE_CACHE_MAX_FILES',
+                minimum=0,
+            ),
             ashare_config_file=os.getenv('ASHARE_CONFIG_FILE', 'config/ashare_intelligence.yaml').strip() or 'config/ashare_intelligence.yaml',
             ashare_scoring_enabled=parse_env_bool(
                 os.getenv('ASHARE_SCORING_ENABLED'),

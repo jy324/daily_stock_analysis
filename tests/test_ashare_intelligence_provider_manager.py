@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Dict
@@ -19,12 +21,19 @@ from data_provider.intelligence.base import (
 from data_provider.intelligence.manager import AShareIntelligenceManager
 
 
-def _config(cache_dir: str, *, enabled: bool = True) -> SimpleNamespace:
+def _config(
+    cache_dir: str,
+    *,
+    enabled: bool = True,
+    priority: str = "fake",
+    cache_max_files: int = 1000,
+) -> SimpleNamespace:
     return SimpleNamespace(
         ashare_intelligence_enabled=enabled,
-        ashare_provider_priority="fake",
+        ashare_provider_priority=priority,
         ashare_cache_dir=cache_dir,
         ashare_config_file="missing-ashare-config.yaml",
+        ashare_cache_max_files=cache_max_files,
     )
 
 
@@ -176,6 +185,111 @@ class AShareIntelligenceManagerTestCase(unittest.TestCase):
         self.assertFalse(stale.cache_hit)
         self.assertEqual(stale.data, {"value": "cached"})
         self.assertEqual(stale_provider.calls, 1)
+
+    def test_provider_priority_falls_back_after_runtime_failure(self) -> None:
+        cache_dir = str(Path(self.temp_dir) / "cache")
+        first_provider = FakeProvider(fail=True)
+        second_provider = FakeProvider(data={"provider": "second"})
+        manager = AShareIntelligenceManager(
+            _config(cache_dir, priority="first,second"),
+            provider_factories={
+                "first": lambda: first_provider,
+                "second": lambda: second_provider,
+            },
+        )
+
+        result = manager.get_capability(
+            "sector_fund_flow",
+            trade_date="2026-06-08",
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.provider, "second")
+        self.assertEqual(result.data, {"provider": "second"})
+        self.assertEqual(first_provider.calls, 1)
+        self.assertEqual(second_provider.calls, 1)
+
+    def test_corrupt_file_cache_is_quarantined_and_provider_refetches(self) -> None:
+        cache_dir = str(Path(self.temp_dir) / "cache")
+        provider = FakeProvider(data={"value": "fresh"})
+        manager = AShareIntelligenceManager(
+            _config(cache_dir),
+            provider_factories={"fake": lambda: provider},
+        )
+        cache_key = manager._cache_key(
+            "fake",
+            "capital_flow_minute",
+            {"code": "600519", "trade_date": "2026-06-08"},
+        )
+        cache_path = manager._cache_path(cache_key)
+        cache_path.parent.mkdir(parents=True)
+        cache_path.write_text("{broken", encoding="utf-8")
+
+        result = manager.get_capability(
+            "capital_flow_minute",
+            code="600519",
+            trade_date="2026-06-08",
+        )
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(provider.calls, 1)
+        self.assertFalse(cache_path.read_text(encoding="utf-8").startswith("{broken"))
+        quarantined = list(cache_path.parent.glob(f"{cache_path.name}.corrupt-*"))
+        self.assertEqual(len(quarantined), 1)
+
+    def test_file_cache_cleanup_keeps_newest_entries(self) -> None:
+        cache_dir = str(Path(self.temp_dir) / "cache")
+        manager = AShareIntelligenceManager(
+            _config(cache_dir, cache_max_files=1),
+            provider_factories={"fake": lambda: FakeProvider()},
+        )
+
+        first = manager.get_capability(
+            "capital_flow_minute",
+            code="600519",
+            trade_date="2026-06-08",
+        )
+        time.sleep(0.01)
+        second = manager.get_capability(
+            "capital_flow_minute",
+            code="000001",
+            trade_date="2026-06-08",
+        )
+
+        cache_files = list(Path(cache_dir).glob("*/*.json"))
+        self.assertEqual(len(cache_files), 1)
+        self.assertEqual(second.status, "ok")
+        self.assertFalse(first.cache_hit)
+
+    def test_singleflight_allows_one_provider_call_for_same_key(self) -> None:
+        cache_dir = str(Path(self.temp_dir) / "cache")
+
+        class SlowProvider(FakeProvider):
+            def fetch(self, capability: str, query: Dict[str, Any]) -> AShareProviderResult:
+                time.sleep(0.05)
+                return super().fetch(capability, query)
+
+        provider = SlowProvider(data={"value": "shared"})
+        manager = AShareIntelligenceManager(
+            _config(cache_dir),
+            provider_factories={"fake": lambda: provider},
+        )
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            results = list(
+                pool.map(
+                    lambda _: manager.get_capability(
+                        "capital_flow_minute",
+                        code="600519",
+                        trade_date="2026-06-08",
+                    ),
+                    range(4),
+                )
+            )
+
+        self.assertEqual(provider.calls, 1)
+        self.assertTrue(any(result.cache_hit for result in results))
+        self.assertTrue(all(result.data == {"value": "shared"} for result in results))
 
 
 if __name__ == "__main__":

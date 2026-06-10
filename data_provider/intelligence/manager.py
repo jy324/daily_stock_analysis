@@ -8,7 +8,7 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import RLock
+from threading import Lock, RLock
 from typing import Any, Callable, Dict, Mapping, Optional
 
 import yaml
@@ -61,6 +61,7 @@ class AShareIntelligenceManager:
         self._providers: Dict[str, AShareProvider] = {}
         self._memory_cache: Dict[str, Dict[str, Any]] = {}
         self._lock = RLock()
+        self._singleflight_locks: Dict[str, Lock] = {}
         self._ttl_seconds = self._load_ttl_seconds(ttl_overrides)
 
     def get_capability(
@@ -79,7 +80,7 @@ class AShareIntelligenceManager:
         if capability not in SUPPORTED_CAPABILITIES:
             raise AShareProviderUnavailable(f"Unsupported A-share capability: {capability}")
 
-        provider_name = self._provider_name()
+        provider_names = self._provider_names()
         query = _clean_query(
             {
                 "code": code,
@@ -89,47 +90,63 @@ class AShareIntelligenceManager:
                 **params,
             }
         )
-        cache_key = self._cache_key(provider_name, capability, query)
         stale_payload: Optional[Dict[str, Any]] = None
+        failures: list[str] = []
 
-        if not refresh:
-            memory_payload = self._read_memory_cache(cache_key)
-            if memory_payload is not None:
-                return self._result_from_cache(memory_payload, cache_hit=True)
+        for provider_name in provider_names:
+            cache_key = self._cache_key(provider_name, capability, query)
 
-            file_payload = self._read_file_cache(cache_key)
-            if file_payload is not None:
-                if self._is_fresh(file_payload):
-                    self._write_memory_cache(cache_key, file_payload)
-                    return self._result_from_cache(file_payload, cache_hit=True)
-                stale_payload = file_payload
-        else:
-            stale_payload = self._read_file_cache(cache_key)
+            if not refresh:
+                memory_payload = self._read_memory_cache(cache_key)
+                if memory_payload is not None:
+                    return self._result_from_cache(memory_payload, cache_hit=True)
 
-        try:
-            provider_result = self._provider(provider_name).fetch(capability, query)
-        except AShareProviderRateLimited:
-            raise
-        except Exception as exc:
-            if stale_payload is not None:
-                return self._stale_result(stale_payload, str(exc) or type(exc).__name__)
-            if isinstance(exc, AShareProviderUnavailable):
-                raise
-            raise AShareProviderUnavailable(str(exc) or type(exc).__name__) from exc
+                file_payload = self._read_file_cache(cache_key)
+                if file_payload is not None:
+                    if self._is_fresh(file_payload):
+                        self._write_memory_cache(cache_key, file_payload)
+                        return self._result_from_cache(file_payload, cache_hit=True)
+                    stale_payload = stale_payload or file_payload
+            else:
+                stale_payload = stale_payload or self._read_file_cache(cache_key)
 
-        result = self._result_from_provider(provider_name, capability, provider_result)
-        if result.status in {"ok", "partial", "empty"}:
-            payload = self._cache_payload(cache_key, result)
-            self._write_memory_cache(cache_key, payload)
-            self._write_file_cache(cache_key, payload)
-        return result
+            singleflight_lock = self._singleflight_lock(cache_key)
+            with singleflight_lock:
+                if not refresh:
+                    memory_payload = self._read_memory_cache(cache_key)
+                    if memory_payload is not None:
+                        return self._result_from_cache(memory_payload, cache_hit=True)
+                    file_payload = self._read_file_cache(cache_key)
+                    if file_payload is not None and self._is_fresh(file_payload):
+                        self._write_memory_cache(cache_key, file_payload)
+                        return self._result_from_cache(file_payload, cache_hit=True)
 
-    def _provider_name(self) -> str:
+                try:
+                    provider_result = self._provider(provider_name).fetch(capability, query)
+                except Exception as exc:
+                    failures.append(f"{provider_name}: {str(exc) or type(exc).__name__}")
+                    continue
+
+                result = self._result_from_provider(provider_name, capability, provider_result)
+                if result.status in {"ok", "partial", "empty"}:
+                    payload = self._cache_payload(cache_key, result)
+                    self._write_memory_cache(cache_key, payload)
+                    self._write_file_cache(cache_key, payload)
+                return result
+
+        if stale_payload is not None:
+            return self._stale_result(stale_payload, "; ".join(failures) or "provider unavailable")
+        raise AShareProviderUnavailable("; ".join(failures) or "No configured A-share provider is available")
+
+    def _provider_names(self) -> list[str]:
         priority = str(getattr(self.config, "ashare_provider_priority", "astock_data") or "astock_data")
+        names: list[str] = []
         for name in [part.strip() for part in priority.split(",") if part.strip()]:
             if name in self._provider_factories:
-                return name
-        raise AShareProviderUnavailable("No configured A-share provider is available")
+                names.append(name)
+        if not names:
+            raise AShareProviderUnavailable("No configured A-share provider is available")
+        return names
 
     def _provider(self, name: str) -> AShareProvider:
         with self._lock:
@@ -171,14 +188,70 @@ class AShareIntelligenceManager:
         try:
             return json.loads(cache_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
+            self._quarantine_corrupt_cache(cache_path)
             return None
 
     def _write_file_cache(self, cache_key: str, payload: Dict[str, Any]) -> None:
         cache_path = self._cache_path(cache_key)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = cache_path.with_suffix(".tmp")
-        tmp_path.write_text(json.dumps(payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
-        tmp_path.replace(cache_path)
+        try:
+            tmp_path.write_text(json.dumps(payload, ensure_ascii=True, sort_keys=True), encoding="utf-8")
+            tmp_path.replace(cache_path)
+        except Exception:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+        self._cleanup_file_cache()
+
+    def _singleflight_lock(self, cache_key: str) -> Lock:
+        with self._lock:
+            lock = self._singleflight_locks.get(cache_key)
+            if lock is None:
+                lock = Lock()
+                self._singleflight_locks[cache_key] = lock
+            return lock
+
+    def _quarantine_corrupt_cache(self, cache_path: Path) -> None:
+        if not cache_path.exists():
+            return
+        quarantine_path = cache_path.with_name(
+            f"{cache_path.name}.corrupt-{int(time.time() * 1000)}"
+        )
+        try:
+            cache_path.replace(quarantine_path)
+        except OSError:
+            try:
+                cache_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _cleanup_file_cache(self) -> None:
+        max_files = _safe_int(getattr(self.config, "ashare_cache_max_files", 1000), default=1000)
+        if max_files <= 0:
+            return
+        cache_dir = Path(str(getattr(self.config, "ashare_cache_dir", "./data/ashare_cache")))
+        if not cache_dir.exists():
+            return
+        try:
+            files = [
+                path
+                for path in cache_dir.glob("*/*.json")
+                if path.is_file()
+            ]
+        except OSError:
+            return
+        overflow = len(files) - max_files
+        if overflow <= 0:
+            return
+        files.sort(key=lambda path: _mtime(path))
+        for path in files[:overflow]:
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
     def _is_fresh(self, payload: Dict[str, Any]) -> bool:
         expires_at = payload.get("expires_at")
@@ -257,6 +330,20 @@ def _default_provider_factories() -> Dict[str, ProviderFactory]:
 
 def _clean_query(query: Dict[str, Any]) -> Dict[str, Any]:
     return {key: value for key, value in query.items() if value is not None}
+
+
+def _safe_int(value: Any, *, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def utc_now_source(provider: str, status: str = "unavailable") -> AShareSourceMetadata:

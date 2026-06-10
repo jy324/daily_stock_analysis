@@ -11,7 +11,7 @@ import copy
 import hashlib
 import json
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, Optional
 
@@ -123,7 +123,7 @@ def ashare_sector_flow(
     refresh: bool = False,
     config: Config = Depends(get_config_dep),
 ) -> AShareIntelligenceResult:
-    query_date = trade_date or _default_ashare_trade_date()
+    query_date = _resolve_ashare_trade_date(trade_date)
     return _service_result(
         AShareIntelligenceService(config),
         "sector_fund_flow",
@@ -142,7 +142,7 @@ def ashare_stock_capital_flow(
     refresh: bool = False,
     config: Config = Depends(get_config_dep),
 ) -> AShareIntelligenceResult:
-    query_date = trade_date or _default_ashare_trade_date()
+    query_date = _resolve_ashare_trade_date(trade_date)
     return _service_result(
         AShareIntelligenceService(config),
         "capital_flow_daily",
@@ -162,7 +162,7 @@ def ashare_stock_risk_events(
     refresh: bool = False,
     config: Config = Depends(get_config_dep),
 ) -> AShareIntelligenceResult:
-    query_date = trade_date or _default_ashare_trade_date()
+    query_date = _resolve_ashare_trade_date(trade_date)
     try:
         return AShareIntelligenceService(config).get_risk_events(
             code=code,
@@ -261,3 +261,37 @@ def _task_trace_id(task: Any) -> Optional[str]:
 
 def _default_ashare_trade_date() -> str:
     return datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+
+
+def _resolve_ashare_trade_date(trade_date: Optional[str]) -> str:
+    if not trade_date:
+        return _default_ashare_trade_date()
+    raw = str(trade_date).strip()
+    try:
+        parsed = date.fromisoformat(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_trade_date",
+                "message": "trade_date must be a valid YYYY-MM-DD date.",
+            },
+        ) from exc
+    if raw != parsed.isoformat():
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "invalid_trade_date",
+                "message": "trade_date must use YYYY-MM-DD format.",
+            },
+        )
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    if parsed > today:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "future_trade_date",
+                "message": "trade_date cannot be in the future.",
+            },
+        )
+    return parsed.isoformat()

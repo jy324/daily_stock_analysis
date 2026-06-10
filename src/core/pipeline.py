@@ -643,6 +643,7 @@ class StockAnalysisPipeline:
 
             # Step 8: 保存分析历史记录
             if result and result.success:
+                saved_count = 0
                 try:
                     self._emit_progress(97, f"{stock_name}：正在保存分析报告")
                     context_snapshot = self._build_context_snapshot(
@@ -674,6 +675,20 @@ class StockAnalysisPipeline:
                         error_message=e,
                     )
                     logger.warning(f"{stock_name}({code}) 保存分析历史失败: {e}")
+
+                # Step 8b: 生成并持久化结构化决策信号（尽力而为，失败不影响分析主流程）
+                if saved_count:
+                    try:
+                        from src.services.decision_signal_service import generate_and_persist_signal
+
+                        generate_and_persist_signal(
+                            self.db,
+                            result=result,
+                            query_id=query_id,
+                            market=getattr(result, "market", None),
+                        )
+                    except Exception as signal_exc:
+                        logger.warning(f"{stock_name}({code}) 生成决策信号失败: {signal_exc}")
 
             return result
 

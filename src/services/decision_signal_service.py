@@ -207,6 +207,55 @@ def advance_active_signals(
     return summary
 
 
+def build_daily_ohlc_provider(fetcher_manager: Any) -> OhlcProvider:
+    """Build an OHLC provider backed by the data layer's daily bars.
+
+    Returns the most recent daily bar's OHLC for a code, or ``None`` when no data
+    is available (suspended/delisted), which advancement treats as a halt.
+    """
+
+    def provider(code: str, day: date) -> Optional[Mapping[str, float]]:
+        frame, _ = fetcher_manager.get_daily_data(code, days=5)
+        if frame is None or getattr(frame, "empty", True):
+            return None
+        last = frame.iloc[-1]
+        return {
+            "open": float(last["open"]),
+            "high": float(last["high"]),
+            "low": float(last["low"]),
+            "close": float(last["close"]),
+        }
+
+    return provider
+
+
+def run_decision_signal_advancement(
+    db: Any = None,
+    *,
+    fetcher_manager: Any = None,
+    today: Optional[date] = None,
+) -> Dict[str, int]:
+    """Daily entry point: advance active signals using live daily bars.
+
+    Defaults wire the live ``DatabaseManager`` and ``DataFetcherManager`` so the
+    scheduler can call this with no arguments; callers should guard it so a
+    failure never breaks the daily run.
+    """
+    if db is None:
+        from src.storage import DatabaseManager
+
+        db = DatabaseManager.get_instance()
+    if fetcher_manager is None:
+        from data_provider import DataFetcherManager
+
+        fetcher_manager = DataFetcherManager()
+    return advance_active_signals(
+        db,
+        today=today or date.today(),
+        ohlc_provider=build_daily_ohlc_provider(fetcher_manager),
+    )
+
+
 def generate_and_persist_signal(
     db: Any,
     *,

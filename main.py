@@ -996,6 +996,14 @@ def main() -> int:
             def scheduled_task():
                 runtime_config = _reload_runtime_config()
                 run_full_analysis(runtime_config, args, scheduled_stock_codes)
+                # 日终推进结构化决策信号（尽力而为，失败不影响调度主流程）
+                try:
+                    from src.services.decision_signal_service import run_decision_signal_advancement
+
+                    summary = run_decision_signal_advancement()
+                    logger.info("[DecisionSignal] 信号推进完成: %s", summary)
+                except Exception as exc:
+                    logger.warning("[DecisionSignal] 信号推进失败: %s", exc)
 
             background_tasks = []
             if getattr(config, 'agent_event_monitor_enabled', False):

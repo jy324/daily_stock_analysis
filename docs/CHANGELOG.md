@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] A 股情报新增观测型 live smoke workflow、API 非交易日校验和 Web 输入证据元数据展示，便于追踪 provider 状态、缓存来源、覆盖率、snapshot revision 与 warnings。
 - [修复] A 股 snapshot SQLite 迁移改为显式写事务和保留 legacy 表，避免旧表结构升级失败时丢失快照数据；A 股 live smoke 和 Docker healthcheck 不再吞掉 provider/API 健康失败。
 - [修复] A 股 snapshot 迁移重建表时按 ORM 定义补建全部二级索引与复合查询索引，避免被迁移的旧库丢失索引、与全新安装 schema 分叉并对 append-only 快照表全表扫描。
+- [新功能] 个股分析在保存历史后生成并持久化结构化决策信号 `DecisionSignal`（方向/动作/入场类型/止盈止损/有效期/生命周期状态），新增 `decision_signals` 追加表，生成失败不影响分析主流程，暂不改变 API/报告渲染。
 
 ## [3.21.0] - 2026-06-07
 

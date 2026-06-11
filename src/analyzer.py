@@ -56,6 +56,7 @@ from src.report_language import (
 )
 from src.schemas.decision_action import build_action_fields
 from src.schemas.report_schema import AnalysisReportSchema
+from src.utils.version_attribution import DEFAULT_STRATEGY_VERSION, compute_prompt_version_hash
 from src.market_context import get_market_role, get_market_guidelines
 from src.market_phase_prompt import format_market_phase_prompt_section
 
@@ -1554,6 +1555,10 @@ class AnalysisResult:
     # ========== 模型标记（Issue #528）==========
     model_used: Optional[str] = None  # 分析使用的 LLM 模型（完整名，如 gemini/gemini-2.0-flash）
 
+    # ========== 版本归因（workflow D.2）==========
+    prompt_version_hash: Optional[str] = None  # 所用 system prompt 模板的 SHA256 前 16 位
+    strategy_version: Optional[str] = None  # 策略版本（来自配置 STRATEGY_VERSION）
+
     # ========== 历史对比（Report Engine P0）==========
     query_id: Optional[str] = None  # 本次分析 query_id，用于历史对比时排除本次记录
 
@@ -2842,6 +2847,8 @@ class GeminiAnalyzer:
                 result.market_snapshot = self._build_market_snapshot(context)
                 result.model_used = model_used
                 result.report_language = report_language
+                result.prompt_version_hash = compute_prompt_version_hash(system_prompt)
+                result.strategy_version = getattr(config, "strategy_version", None) or DEFAULT_STRATEGY_VERSION
                 normalize_chip_structure_availability(result, context.get("chip"))
 
                 # 内容完整性校验（可选）

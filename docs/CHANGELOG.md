@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] A 股 snapshot 迁移重建表时按 ORM 定义补建全部二级索引与复合查询索引，避免被迁移的旧库丢失索引、与全新安装 schema 分叉并对 append-only 快照表全表扫描。
 - [新功能] 个股分析在保存历史后生成并持久化结构化决策信号 `DecisionSignal`（方向/动作/入场类型/止盈止损/有效期/生命周期状态），新增 `decision_signals` 追加表，生成失败不影响分析主流程，暂不改变 API/报告渲染。
 - [新功能] 决策信号新增生命周期状态机与日终推进：定时任务在每日分析后用日线 OHLC 推进 active 信号（入场触发/止盈止损/到期，止损优先），记录入场出场价与状态流转历史，单只失败隔离不影响其余与调度主流程。
+- [新功能] 新增数据质量决策策略引擎（Quality Policy Engine）框架：按只读数据质量概览（数据块 status + overall_score）与市场阶段评估 YAML 策略，产出结构化 `QualityPolicyDecision`（禁止精确入场/置信度上限/事件信号降级/仅观察/告警二次确认）；`QUALITY_POLICY_FILE` 缺失或解析失败即关闭全部策略，分析主流程不受影响，本阶段只生产决策不接入消费侧。
 
 ## [3.21.0] - 2026-06-07
 

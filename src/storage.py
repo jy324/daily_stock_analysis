@@ -499,8 +499,11 @@ class BacktestResult(Base):
     # 模拟执行（long-only）
     simulated_entry_price = Column(Float)
     simulated_exit_price = Column(Float)
-    simulated_exit_reason = Column(String(24))  # stop_loss/take_profit/window_end/cash/ambiguous_stop_loss
+    simulated_exit_reason = Column(String(24))  # stop_loss/take_profit/window_end/cash/ambiguous_stop_loss/not_entered
     simulated_return_pct = Column(Float)
+
+    # 评估来源：True 表示消费结构化 DecisionSignal，False/NULL 表示关键词回退法（workflow B.3）
+    signal_based = Column(Boolean, nullable=False, default=False)
 
     __table_args__ = (
         UniqueConstraint(
@@ -1015,6 +1018,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             Base.metadata.create_all(self._engine)
             self._ensure_ashare_snapshot_schema()
             self._ensure_decision_signal_lifecycle_columns()
+            self._ensure_backtest_signal_columns()
             self._ensure_schema_migration_record()
 
             self._initialized = True
@@ -1061,6 +1065,26 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     connection.exec_driver_sql(
                         f'ALTER TABLE "{table_name}" ADD COLUMN {column} {declaration}'
                     )
+
+    def _ensure_backtest_signal_columns(self) -> None:
+        """Additively add the B.3 ``signal_based`` flag to an existing backtest_results table.
+
+        Fresh databases get it via ``create_all``; existing databases gain it through
+        ``ALTER TABLE ADD COLUMN`` with a default so legacy rows read as keyword-based.
+        Non-SQLite engines are left to ``create_all``.
+        """
+        if not self._is_sqlite_engine:
+            return
+
+        table_name = BacktestResult.__tablename__
+        with self._engine.begin() as connection:
+            if not self._sqlite_table_exists(connection, table_name):
+                return
+            existing = self._sqlite_table_columns(connection, table_name)
+            if "signal_based" not in existing:
+                connection.exec_driver_sql(
+                    f'ALTER TABLE "{table_name}" ADD COLUMN signal_based BOOLEAN NOT NULL DEFAULT 0'
+                )
 
     def _ensure_ashare_snapshot_schema(self) -> None:
         """Upgrade the A-share snapshot table to the append-only schema on SQLite."""

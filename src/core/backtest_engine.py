@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+import math
 import re
 from typing import Any, Dict, Iterable, List, Optional, Protocol, Sequence
 
@@ -568,6 +569,7 @@ class BacktestEngine:
 
         advice_breakdown = cls._compute_advice_breakdown(completed)
         diagnostics = cls._compute_diagnostics(results_list)
+        risk_metrics = cls.compute_risk_metrics(completed)
 
         return {
             "scope": scope,
@@ -593,6 +595,14 @@ class BacktestEngine:
             "avg_days_to_first_hit": avg_days_to_first_hit,
             "advice_breakdown": advice_breakdown,
             "diagnostics": diagnostics,
+            "max_drawdown_pct": risk_metrics["max_drawdown_pct"],
+            "volatility_pct": risk_metrics["volatility_pct"],
+            "sharpe": risk_metrics["sharpe"],
+            "sortino": risk_metrics["sortino"],
+            "calmar": risk_metrics["calmar"],
+            "profit_factor": risk_metrics["profit_factor"],
+            "payoff_ratio": risk_metrics["payoff_ratio"],
+            "holding_period_stats": risk_metrics["holding_period_stats"],
         }
 
     @staticmethod
@@ -848,6 +858,107 @@ class BacktestEngine:
             exit_price,
             exit_reason,
         )
+
+    @classmethod
+    def compute_risk_metrics(cls, results: Iterable[Any], *, risk_free_pct: float = 0.0) -> Dict[str, Any]:
+        """Compute risk/return metrics over completed per-trade simulated returns.
+
+        Inputs are result-like rows exposing ``eval_status``, ``simulated_return_pct``,
+        ``analysis_date`` and ``first_hit_trading_days``. Only ``completed`` rows with a
+        non-null ``simulated_return_pct`` contribute, ordered by ``analysis_date`` for the
+        compounded equity curve. All return figures are percentages. Metrics that are
+        undefined for the sample (e.g. volatility with <2 trades, profit factor with no
+        losses) are ``None`` rather than a misleading zero.
+        """
+        rows = [
+            r
+            for r in results
+            if (getattr(r, "eval_status", "") or "") == "completed"
+            and getattr(r, "simulated_return_pct", None) is not None
+        ]
+        rows.sort(key=lambda r: (getattr(r, "analysis_date", None) is None, getattr(r, "analysis_date", None)))
+        returns = [float(r.simulated_return_pct) for r in rows]
+        n = len(returns)
+
+        empty = {
+            "max_drawdown_pct": 0.0,
+            "volatility_pct": None,
+            "sharpe": None,
+            "sortino": None,
+            "calmar": None,
+            "profit_factor": None,
+            "payoff_ratio": None,
+            "holding_period_stats": cls._holding_period_stats(results),
+        }
+        if n == 0:
+            return empty
+
+        mean_r = sum(returns) / n
+        excess_mean = mean_r - float(risk_free_pct)
+
+        volatility = None
+        sharpe = None
+        if n >= 2:
+            variance = sum((r - mean_r) ** 2 for r in returns) / (n - 1)
+            volatility = math.sqrt(variance)
+            if volatility > 0:
+                sharpe = excess_mean / volatility
+
+        downside_sq_mean = sum((min(0.0, r)) ** 2 for r in returns) / n
+        downside_dev = math.sqrt(downside_sq_mean)
+        sortino = excess_mean / downside_dev if downside_dev > 0 else None
+
+        equity = 1.0
+        peak = 1.0
+        max_dd = 0.0
+        for r in returns:
+            equity *= 1.0 + r / 100.0
+            if equity > peak:
+                peak = equity
+            elif peak > 0:
+                drawdown = (peak - equity) / peak
+                if drawdown > max_dd:
+                    max_dd = drawdown
+        max_drawdown_pct = max_dd * 100.0
+        total_return_pct = (equity - 1.0) * 100.0
+        calmar = total_return_pct / max_drawdown_pct if max_drawdown_pct > 0 else None
+
+        wins = [r for r in returns if r > 0]
+        losses = [r for r in returns if r < 0]
+        gross_loss = abs(sum(losses))
+        profit_factor = sum(wins) / gross_loss if losses else None
+        payoff_ratio = (
+            (sum(wins) / len(wins)) / (abs(sum(losses)) / len(losses)) if wins and losses else None
+        )
+
+        return {
+            "max_drawdown_pct": round(max_drawdown_pct, 4),
+            "volatility_pct": round(volatility, 4) if volatility is not None else None,
+            "sharpe": round(sharpe, 4) if sharpe is not None else None,
+            "sortino": round(sortino, 4) if sortino is not None else None,
+            "calmar": round(calmar, 4) if calmar is not None else None,
+            "profit_factor": round(profit_factor, 4) if profit_factor is not None else None,
+            "payoff_ratio": round(payoff_ratio, 4) if payoff_ratio is not None else None,
+            "holding_period_stats": cls._holding_period_stats(results),
+        }
+
+    @staticmethod
+    def _holding_period_stats(results: Iterable[Any]) -> Dict[str, Any]:
+        """Aggregate ``first_hit_trading_days`` over completed rows that reached a target/stop."""
+        days = [
+            int(getattr(r, "first_hit_trading_days"))
+            for r in results
+            if (getattr(r, "eval_status", "") or "") == "completed"
+            and getattr(r, "first_hit_trading_days", None) is not None
+        ]
+        if not days:
+            return {}
+        return {
+            "count": len(days),
+            "avg": round(sum(days) / len(days), 4),
+            "min": min(days),
+            "max": max(days),
+        }
 
     @staticmethod
     def _average(values: Iterable[Optional[float]]) -> Optional[float]:

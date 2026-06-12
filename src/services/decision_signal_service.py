@@ -15,8 +15,12 @@ from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 from src.repositories.decision_signal_repo import DecisionSignalRepository
 from src.schemas.decision_signal import DecisionSignal, build_signal_from_analysis_fields
+from src.schemas.quality_policy import QualityPolicyDecision
 
 logger = logging.getLogger(__name__)
+
+# Confidence levels ordered tightest -> loosest, for cap comparison.
+_CONFIDENCE_RANK: Dict[str, int] = {"low": 0, "medium": 1, "high": 2}
 
 # A callable that returns one day's OHLC for a code, or ``None`` if unavailable
 # (e.g. suspended/halted). Decouples advancement from the data-fetching layer.
@@ -256,6 +260,68 @@ def run_decision_signal_advancement(
     )
 
 
+def constrain_signal_with_quality_policy(
+    signal: DecisionSignal,
+    decision: Optional[QualityPolicyDecision],
+) -> DecisionSignal:
+    """Apply data-quality policy constraints to a signal's fields (workflow C.2).
+
+    - ``observation_only`` makes the signal non-executable: direction is forced to
+      ``neutral`` and any entry is cleared.
+    - ``prohibit_precise_entry`` downgrades a ``precise`` entry to ``none`` (a zone
+      entry is permitted and left intact).
+    - ``cap_confidence`` lowers the confidence level toward the tightest cap; it
+      never raises an already-tighter level.
+
+    What changed (and which policies caused it) is recorded in
+    ``quality_constraints`` for auditability. Returns the original signal unchanged
+    when no constraint applies.
+    """
+    if decision is None or decision.is_empty:
+        return signal
+
+    updates: Dict[str, Any] = {}
+    effects: list[str] = []
+
+    if decision.observation_only:
+        updates.update(
+            direction="neutral",
+            action="watch",
+            position_size_pct=None,
+            entry_type="none",
+            entry_price=None,
+            entry_low=None,
+            entry_high=None,
+            stop_loss=None,
+            take_profit=None,
+        )
+        effects.append("observation_only: 信号置为仅观察（action=watch, direction=neutral, entry=none）")
+    elif decision.prohibit_precise_entry and signal.entry_type == "precise":
+        updates.update(entry_type="none", entry_price=None)
+        effects.append("prohibit_precise_entry: precise 入场降级为 none")
+
+    cap = decision.confidence_cap
+    if cap is not None and signal.confidence_level is not None:
+        if _CONFIDENCE_RANK.get(signal.confidence_level, 2) > _CONFIDENCE_RANK.get(cap, 2):
+            updates["confidence_level"] = cap
+            effects.append(f"cap_confidence: 置信度收敛为 {cap}")
+
+    if not effects:
+        return signal
+
+    quality_constraints = dict(signal.quality_constraints or {})
+    quality_constraints.update(
+        {
+            "policies": decision.matched_policy_ids,
+            "actions": decision.action_types,
+            "reasons": decision.reasons,
+            "effects": effects,
+        }
+    )
+    updates["quality_constraints"] = quality_constraints
+    return signal.model_copy(update=updates)
+
+
 def generate_and_persist_signal(
     db: Any,
     *,
@@ -292,4 +358,29 @@ def generate_and_persist_signal(
         market=market,
         analysis_history_id=history.id,
     )
+
+    signal = _apply_quality_policy_from_history(signal, history)
     return DecisionSignalRepository(db).save_signal(signal)
+
+
+def _apply_quality_policy_from_history(signal: DecisionSignal, history: Any) -> DecisionSignal:
+    """Evaluate data-quality policies from the analysis snapshot and constrain the signal.
+
+    Best-effort and fully guarded: any failure (missing snapshot, unreadable policy
+    file, evaluation error) leaves the unconstrained signal intact so signal
+    generation never breaks the analysis pipeline.
+    """
+    try:
+        from src.analysis_context_pack_overview import extract_analysis_context_pack_overview
+        from src.market_phase_summary import extract_market_phase_summary
+        from src.services.quality_policy_service import QualityPolicyService
+
+        snapshot = getattr(history, "context_snapshot", None)
+        overview = extract_analysis_context_pack_overview(snapshot)
+        phase_summary = extract_market_phase_summary(snapshot)
+        phase = phase_summary.get("phase") if isinstance(phase_summary, Mapping) else None
+        decision = QualityPolicyService().evaluate(overview, phase=phase)
+        return constrain_signal_with_quality_policy(signal, decision)
+    except Exception as exc:
+        logger.warning("决策信号质量策略约束失败，保留未约束信号: %s", exc)
+        return signal

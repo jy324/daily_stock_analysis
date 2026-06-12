@@ -57,6 +57,9 @@ class BacktestService:
             eval_window_days=int(eval_window_days),
             neutral_band_pct=neutral_band_pct,
             engine_version=str(engine_version),
+            commission_rate=float(getattr(config, "backtest_commission_rate", 0.0)),
+            stamp_tax_rate=float(getattr(config, "backtest_stamp_tax_rate", 0.0)),
+            slippage_bp=float(getattr(config, "backtest_slippage_bp", 0.0)),
         )
 
         candidates = self.repo.get_candidates(
@@ -193,6 +196,7 @@ class BacktestService:
                         simulated_exit_reason=evaluation.get("simulated_exit_reason"),
                         simulated_return_pct=evaluation.get("simulated_return_pct"),
                         signal_based=bool(evaluation.get("signal_based", False)),
+                        cost_pct=evaluation.get("cost_pct"),
                     )
                 )
 
@@ -712,6 +716,7 @@ class BacktestService:
             "simulated_exit_reason": row.simulated_exit_reason,
             "simulated_return_pct": row.simulated_return_pct,
             "signal_based": bool(getattr(row, "signal_based", False)),
+            "cost_pct": getattr(row, "cost_pct", None),
         }
 
     @staticmethod

@@ -14,6 +14,7 @@ from src.config import get_config
 from src.core.backtest_engine import OVERALL_SENTINEL_CODE, BacktestEngine, EvaluationConfig
 from src.market_phase_summary import extract_market_phase_summary, normalize_analysis_phase_bucket
 from src.repositories.backtest_repo import BacktestRepository
+from src.repositories.decision_signal_repo import DecisionSignalRepository
 from src.repositories.stock_repo import StockRepository
 from src.schemas.decision_action import build_action_fields
 from src.storage import BacktestResult, BacktestSummary, DatabaseManager
@@ -31,6 +32,7 @@ class BacktestService:
         self.db = db_manager or DatabaseManager.get_instance()
         self.repo = BacktestRepository(self.db)
         self.stock_repo = StockRepository(self.db)
+        self.signal_repo = DecisionSignalRepository(self.db)
 
     def run_backtest(
         self,
@@ -130,15 +132,27 @@ class BacktestService:
                         eval_window_days=int(eval_window_days),
                     )
 
-                evaluation = BacktestEngine.evaluate_single(
-                    operation_advice=analysis.operation_advice,
-                    analysis_date=start_daily.date,
-                    start_price=float(start_daily.close),
-                    forward_bars=forward_bars,
-                    stop_loss=analysis.stop_loss,
-                    take_profit=analysis.take_profit,
-                    config=eval_config,
-                )
+                # Prefer the structured DecisionSignal when one exists for this analysis;
+                # legacy records without a signal fall back to the keyword-inference path.
+                signal_record = self.signal_repo.get_latest_for_analysis(analysis.id)
+                if signal_record is not None:
+                    evaluation = BacktestEngine.evaluate_from_decision_signal(
+                        signal=signal_record.to_signal(),
+                        analysis_date=start_daily.date,
+                        start_price=float(start_daily.close),
+                        forward_bars=forward_bars,
+                        config=eval_config,
+                    )
+                else:
+                    evaluation = BacktestEngine.evaluate_single(
+                        operation_advice=analysis.operation_advice,
+                        analysis_date=start_daily.date,
+                        start_price=float(start_daily.close),
+                        forward_bars=forward_bars,
+                        stop_loss=analysis.stop_loss,
+                        take_profit=analysis.take_profit,
+                        config=eval_config,
+                    )
 
                 status = evaluation.get("eval_status")
                 if status == "insufficient_data":
@@ -178,6 +192,7 @@ class BacktestService:
                         simulated_exit_price=evaluation.get("simulated_exit_price"),
                         simulated_exit_reason=evaluation.get("simulated_exit_reason"),
                         simulated_return_pct=evaluation.get("simulated_return_pct"),
+                        signal_based=bool(evaluation.get("signal_based", False)),
                     )
                 )
 
@@ -688,6 +703,7 @@ class BacktestService:
             "simulated_exit_price": row.simulated_exit_price,
             "simulated_exit_reason": row.simulated_exit_reason,
             "simulated_return_pct": row.simulated_return_pct,
+            "signal_based": bool(getattr(row, "signal_based", False)),
         }
 
     @staticmethod

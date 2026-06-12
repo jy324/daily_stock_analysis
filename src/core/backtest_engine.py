@@ -271,6 +271,215 @@ class BacktestEngine:
             "simulated_return_pct": simulated_return_pct,
         }
 
+    @staticmethod
+    def _direction_expected_from_signal(direction: Optional[str], action: Optional[str]) -> str:
+        """Map a structured signal's direction/action to the outcome direction taxonomy.
+
+        ``hold`` is treated as ``not_down`` (the structured equivalent of "don't drop");
+        otherwise direction drives expectation. No keyword inference is involved.
+        """
+        if action == "hold":
+            return "not_down"
+        if direction == "long":
+            return "up"
+        if direction == "short":
+            return "down"
+        return "flat"
+
+    @classmethod
+    def _simulate_signal_execution(
+        cls,
+        *,
+        signal: Any,
+        window: List[DailyBarLike],
+        end_close: Optional[float],
+    ) -> Dict[str, Any]:
+        """Walk forward bars through the live lifecycle fill model to simulate execution.
+
+        Reuses ``advance_signal_for_day`` so the backtest fill semantics (limit/zone/
+        market entry with gaps, stop-priority exits, entry-day-then-exit conservatism)
+        are identical to the production daily advancement. A signal whose entry never
+        triggers inside the window is recorded as ``not_entered`` with zero P&L.
+        """
+        from src.services.decision_signal_service import advance_signal_for_day, is_terminal_state
+
+        working = signal.model_copy(update={"state": "generated"})
+        stop_loss = getattr(signal, "stop_loss", None)
+        take_profit = getattr(signal, "take_profit", None)
+
+        entered_price: Optional[float] = None
+        exit_price: Optional[float] = None
+        exit_reason: Optional[str] = None
+        exit_date: Optional[date] = None
+        exit_days: Optional[int] = None
+        first_hit = "neither"
+        hit_sl: Optional[bool] = None if stop_loss is None else False
+        hit_tp: Optional[bool] = None if take_profit is None else False
+
+        for idx, bar in enumerate(window, start=1):
+            if is_terminal_state(working.state):
+                break
+            if bar.open is None or bar.high is None or bar.low is None:
+                continue  # halted/suspended day
+            ohlc = {"open": bar.open, "high": bar.high, "low": bar.low, "close": bar.close}
+            advance = advance_signal_for_day(working, day=bar.date, ohlc=ohlc)
+            if advance.to_state is None:
+                continue
+            working = working.model_copy(update={"state": advance.to_state})
+            if advance.entered_price is not None:
+                entered_price = advance.entered_price
+            if advance.closed_price is not None:
+                exit_price = advance.closed_price
+                exit_days = idx
+                exit_date = bar.date
+                if advance.to_state == "stop_hit":
+                    hit_sl = True
+                    # A same-day touch of both levels is ambiguous on daily bars.
+                    if take_profit is not None and bar.high is not None and bar.high >= take_profit:
+                        hit_tp = True
+                        first_hit = "ambiguous"
+                        exit_reason = "ambiguous_stop_loss"
+                    else:
+                        first_hit = "stop_loss"
+                        exit_reason = "stop_loss"
+                elif advance.to_state == "target_hit":
+                    hit_tp = True
+                    first_hit = "take_profit"
+                    exit_reason = "take_profit"
+                elif advance.to_state == "expired":
+                    exit_reason = "expired"
+                break
+
+        if entered_price is None:
+            return {
+                "simulated_entry_price": None,
+                "simulated_exit_price": None,
+                "simulated_exit_reason": "not_entered",
+                "simulated_return_pct": 0.0,
+                "hit_stop_loss": hit_sl,
+                "hit_take_profit": hit_tp,
+                "first_hit": "not_entered",
+                "first_hit_date": None,
+                "first_hit_trading_days": None,
+                "entered": False,
+            }
+
+        if exit_price is None:
+            exit_price = end_close
+            exit_reason = "window_end"
+            first_hit = "neither"
+            exit_date = None
+            exit_days = None
+
+        simulated_return_pct = (
+            None if exit_price is None else (exit_price - entered_price) / entered_price * 100
+        )
+        return {
+            "simulated_entry_price": entered_price,
+            "simulated_exit_price": exit_price,
+            "simulated_exit_reason": exit_reason,
+            "simulated_return_pct": simulated_return_pct,
+            "hit_stop_loss": hit_sl,
+            "hit_take_profit": hit_tp,
+            "first_hit": first_hit,
+            "first_hit_date": exit_date,
+            "first_hit_trading_days": exit_days,
+            "entered": True,
+        }
+
+    @classmethod
+    def evaluate_from_decision_signal(
+        cls,
+        *,
+        signal: Any,
+        analysis_date: date,
+        start_price: float,
+        forward_bars: Sequence[DailyBarLike],
+        config: EvaluationConfig,
+    ) -> Dict[str, Any]:
+        """Evaluate a historical analysis using its structured DecisionSignal.
+
+        Direction and position come straight from the signal (no keyword inference),
+        and execution is simulated through the live lifecycle fill model. The stock
+        return / direction-correctness split mirrors :meth:`evaluate_single`, while
+        ``simulated_return_pct`` reflects the realistic entry fill rather than assuming
+        entry at ``start_price``.
+        """
+        eval_days = int(config.eval_window_days)
+        if eval_days <= 0:
+            raise ValueError("eval_window_days must be positive")
+
+        direction = getattr(signal, "direction", "neutral")
+        action = getattr(signal, "action", None)
+        position = "long" if direction == "long" else "cash"
+        direction_expected = cls._direction_expected_from_signal(direction, action)
+
+        base = {
+            "analysis_date": analysis_date,
+            "engine_version": config.engine_version,
+            "operation_advice": getattr(signal, "operation_advice", None),
+            "position_recommendation": position,
+            "direction_expected": direction_expected,
+            "signal_based": True,
+            "source": getattr(signal, "source", None),
+        }
+
+        if start_price is None or start_price <= 0:
+            return {**base, "eval_status": "error"}
+
+        if len(forward_bars) < eval_days:
+            return {**base, "eval_status": "insufficient_data", "eval_window_days": eval_days}
+
+        window = list(forward_bars[:eval_days])
+        end_close = window[-1].close
+        highs = [b.high for b in window if b.high is not None]
+        lows = [b.low for b in window if b.low is not None]
+        max_high = max(highs) if highs else None
+        min_low = min(lows) if lows else None
+        stock_return_pct: Optional[float]
+        if end_close is None:
+            stock_return_pct = None
+        else:
+            stock_return_pct = (end_close - start_price) / start_price * 100
+
+        outcome, direction_correct = cls._classify_outcome(
+            stock_return_pct=stock_return_pct,
+            direction_expected=direction_expected,
+            neutral_band_pct=config.neutral_band_pct,
+        )
+
+        if position != "long":
+            sim = {
+                "simulated_entry_price": None,
+                "simulated_exit_price": None,
+                "simulated_exit_reason": "cash",
+                "simulated_return_pct": 0.0,
+                "hit_stop_loss": None,
+                "hit_take_profit": None,
+                "first_hit": "not_applicable",
+                "first_hit_date": None,
+                "first_hit_trading_days": None,
+                "entered": False,
+            }
+        else:
+            sim = cls._simulate_signal_execution(signal=signal, window=window, end_close=end_close)
+
+        return {
+            **base,
+            "eval_window_days": eval_days,
+            "eval_status": "completed",
+            "start_price": start_price,
+            "end_close": end_close,
+            "max_high": max_high,
+            "min_low": min_low,
+            "stock_return_pct": stock_return_pct,
+            "direction_correct": direction_correct,
+            "outcome": outcome,
+            "stop_loss": getattr(signal, "stop_loss", None),
+            "take_profit": getattr(signal, "take_profit", None),
+            **sim,
+        }
+
     @classmethod
     def compute_summary(
         cls,

@@ -564,6 +564,16 @@ class BacktestSummary(Base):
     ambiguous_rate = Column(Float)
     avg_days_to_first_hit = Column(Float)
 
+    # 风险/收益指标（workflow D.1a，基于已完成交易的模拟收益序列）
+    max_drawdown_pct = Column(Float)
+    volatility_pct = Column(Float)
+    sharpe = Column(Float)
+    sortino = Column(Float)
+    calmar = Column(Float)
+    profit_factor = Column(Float)
+    payoff_ratio = Column(Float)
+    holding_period_stats_json = Column(Text)
+
     # 诊断字段（JSON 字符串）
     advice_breakdown_json = Column(Text)
     diagnostics_json = Column(Text)
@@ -1027,6 +1037,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._ensure_ashare_snapshot_schema()
             self._ensure_decision_signal_lifecycle_columns()
             self._ensure_backtest_signal_columns()
+            self._ensure_backtest_summary_risk_columns()
             self._ensure_analysis_history_attribution_columns()
             self._ensure_schema_migration_record()
 
@@ -1094,6 +1105,37 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 connection.exec_driver_sql(
                     f'ALTER TABLE "{table_name}" ADD COLUMN signal_based BOOLEAN NOT NULL DEFAULT 0'
                 )
+
+    def _ensure_backtest_summary_risk_columns(self) -> None:
+        """Additively add the D.1a risk/return metric columns to backtest_summaries.
+
+        Fresh databases get these via ``create_all``; existing databases gain them
+        through ``ALTER TABLE ADD COLUMN`` (no-rewrite on SQLite). Legacy summary rows
+        read NULL until recomputed.
+        """
+        if not self._is_sqlite_engine:
+            return
+
+        table_name = BacktestSummary.__tablename__
+        with self._engine.begin() as connection:
+            if not self._sqlite_table_exists(connection, table_name):
+                return
+            existing = self._sqlite_table_columns(connection, table_name)
+            additions = {
+                "max_drawdown_pct": "FLOAT",
+                "volatility_pct": "FLOAT",
+                "sharpe": "FLOAT",
+                "sortino": "FLOAT",
+                "calmar": "FLOAT",
+                "profit_factor": "FLOAT",
+                "payoff_ratio": "FLOAT",
+                "holding_period_stats_json": "TEXT",
+            }
+            for column, declaration in additions.items():
+                if column not in existing:
+                    connection.exec_driver_sql(
+                        f'ALTER TABLE "{table_name}" ADD COLUMN {column} {declaration}'
+                    )
 
     def _ensure_analysis_history_attribution_columns(self) -> None:
         """Additively add the D.2 version-attribution columns to analysis_history.

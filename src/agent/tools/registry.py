@@ -110,9 +110,27 @@ class ToolRegistry:
         """Return a tool definition by name."""
         return self._tools.get(name)
 
+    def resolve_name(self, name: str) -> Optional[str]:
+        """Return the registered tool name for an execution request.
+
+        Gemini may return OpenAPI-style names such as
+        ``default_api:get_realtime_quote`` even though the registry exposes the
+        plain tool name. Keep that compatibility path narrow so arbitrary
+        namespaces do not bypass guards that inspect the registered tool
+        definition before execution.
+        """
+        if name in self._tools:
+            return name
+        if name.startswith("default_api:"):
+            candidate = name.split(":", 1)[-1]
+            if candidate in self._tools:
+                return candidate
+        return None
+
     def resolve(self, name: str) -> Optional[ToolDefinition]:
-        """Return a tool definition by exact registered name."""
-        return self._tools.get(name)
+        """Return a tool definition for a supported execution name."""
+        resolved_name = self.resolve_name(name)
+        return self._tools.get(resolved_name) if resolved_name else None
 
     def list_tools(self, category: Optional[str] = None) -> List[ToolDefinition]:
         """List all tools, optionally filtered by category."""
@@ -146,7 +164,8 @@ class ToolRegistry:
         Raises ``KeyError`` if tool not found.
         Raises the handler's exception on execution failure.
 
-        Tool names must match the registry exactly.
+        Supports Gemini ``default_api:`` namespaced tool names while rejecting
+        other namespace shapes.
         """
         tool_def = self.resolve(name)
         if tool_def is None:

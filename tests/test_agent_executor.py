@@ -765,7 +765,7 @@ class TestAgentExecutor(unittest.TestCase):
                 self.assertEqual(len(tool_messages), 1)
                 self.assertIn("stock_scope_violation", tool_messages[0]["content"])
 
-    def test_run_agent_loop_rejects_namespaced_tool_name_without_executing_handler(self):
+    def test_run_agent_loop_guards_default_namespaced_stock_tool_before_execution(self):
         executed_calls = []
         registry = _make_stock_registry(executed_calls)
         adapter = _make_mock_adapter()
@@ -804,11 +804,54 @@ class TestAgentExecutor(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(executed_calls, [])
         self.assertFalse(result.tool_calls_log[0]["success"])
-        self.assertNotIn("guarded", result.tool_calls_log[0])
+        self.assertTrue(result.tool_calls_log[0]["guarded"])
         self.assertEqual(result.tool_calls_log[0]["tool"], "default_api:search_stock_news")
+        self.assertEqual(result.tool_calls_log[0]["requested_stock_code"], "AAPL")
         tool_messages = [msg for msg in result.messages if msg.get("role") == "tool"]
         self.assertEqual(len(tool_messages), 1)
-        self.assertIn("not found in registry", tool_messages[0]["content"])
+        self.assertIn("stock_scope_violation", tool_messages[0]["content"])
+
+    def test_run_agent_loop_executes_allowed_default_namespaced_stock_tool(self):
+        executed_calls = []
+        registry = _make_stock_registry(executed_calls)
+        adapter = _make_mock_adapter()
+        adapter.call_with_tools.side_effect = [
+            LLMResponse(
+                content="Need quote.",
+                tool_calls=[
+                    ToolCall(
+                        id="quote_1",
+                        name="default_api:get_realtime_quote",
+                        arguments={"stock_code": "600519"},
+                    ),
+                ],
+                usage={"total_tokens": 10},
+                provider="gemini",
+            ),
+            LLMResponse(
+                content="Current quote checked.",
+                tool_calls=[],
+                usage={"total_tokens": 10},
+                provider="gemini",
+            ),
+        ]
+
+        result = run_agent_loop(
+            messages=[
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": "继续看当前标的"},
+            ],
+            tool_registry=registry,
+            llm_adapter=adapter,
+            max_steps=3,
+            stock_scope=StockScope(expected_stock_code="600519", allowed_stock_codes={"600519"}),
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(executed_calls, [("quote", "600519")])
+        self.assertTrue(result.tool_calls_log[0]["success"])
+        self.assertEqual(result.tool_calls_log[0]["tool"], "default_api:get_realtime_quote")
+        self.assertNotIn("guarded", result.tool_calls_log[0])
 
     def test_parallel_tool_batch_guards_only_conflicting_stock_calls(self):
         executed_calls = []

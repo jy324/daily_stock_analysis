@@ -138,13 +138,13 @@ class TestToolRegistry(unittest.TestCase):
         result = self.registry.execute("exec_test", stock_code="600519", days=10)
         self.assertEqual(result, {"code": "600519", "days": 10})
 
-    def test_resolve_does_not_accept_default_colon_namespaced_tool_name(self):
+    def test_resolve_accepts_default_colon_namespaced_tool_name(self):
         tool = _make_tool("exec_test")
         self.registry.register(tool)
 
-        self.assertIsNone(self.registry.resolve("default_api:exec_test"))
-        with self.assertRaises(KeyError):
-            self.registry.execute("default_api:exec_test", stock_code="600519", days=10)
+        self.assertIs(self.registry.resolve("default_api:exec_test"), tool)
+        result = self.registry.execute("default_api:exec_test", stock_code="600519", days=10)
+        self.assertEqual(result, {"code": "600519", "days": 10})
 
     def test_resolve_does_not_accept_dotted_suffix_tool_name(self):
         tool = _make_tool("exec_test")

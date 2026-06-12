@@ -652,6 +652,10 @@ class Config:
     # 策略文件路径；文件缺失或解析失败 = 关闭全部策略，分析主流程不受影响。
     quality_policy_file: str = "config/quality_policies.yaml"
 
+    # === 版本归因（workflow D.2）===
+    # 落入 AnalysisHistory.strategy_version，用于按策略版本归因回测结果。
+    strategy_version: str = "v1"
+
     # === AI 分析配置 ===
     # LiteLLM unified model config (provider/model format, e.g. gemini/gemini-3.1-pro-preview)
     litellm_model: str = ""  # Primary model; must include provider prefix when set explicitly
@@ -1843,6 +1847,7 @@ class Config:
                 default=False,
             ),
             quality_policy_file=os.getenv('QUALITY_POLICY_FILE', 'config/quality_policies.yaml').strip() or 'config/quality_policies.yaml',
+            strategy_version=os.getenv('STRATEGY_VERSION', 'v1').strip() or 'v1',
         )
     
     @classmethod

@@ -309,6 +309,11 @@ class AnalysisHistory(Base):
     stop_loss = Column(Float)
     take_profit = Column(Float)
 
+    # 版本归因（workflow D.2）：用于按模型/prompt/策略版本归因回测结果，旧行 NULL 视为 unknown
+    model_used = Column(String(128))
+    prompt_version_hash = Column(String(16))
+    strategy_version = Column(String(32))
+
     created_at = Column(DateTime, default=datetime.now, index=True)
 
     __table_args__ = (
@@ -334,6 +339,9 @@ class AnalysisHistory(Base):
             'secondary_buy': self.secondary_buy,
             'stop_loss': self.stop_loss,
             'take_profit': self.take_profit,
+            'model_used': self.model_used,
+            'prompt_version_hash': self.prompt_version_hash,
+            'strategy_version': self.strategy_version,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
 
@@ -1019,6 +1027,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._ensure_ashare_snapshot_schema()
             self._ensure_decision_signal_lifecycle_columns()
             self._ensure_backtest_signal_columns()
+            self._ensure_analysis_history_attribution_columns()
             self._ensure_schema_migration_record()
 
             self._initialized = True
@@ -1085,6 +1094,32 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 connection.exec_driver_sql(
                     f'ALTER TABLE "{table_name}" ADD COLUMN signal_based BOOLEAN NOT NULL DEFAULT 0'
                 )
+
+    def _ensure_analysis_history_attribution_columns(self) -> None:
+        """Additively add the D.2 version-attribution columns to analysis_history.
+
+        Fresh databases get these via ``create_all``; existing databases gain them
+        through ``ALTER TABLE ADD COLUMN`` (no-rewrite on SQLite). Legacy rows read
+        NULL, which the attribution query layer treats as ``unknown``.
+        """
+        if not self._is_sqlite_engine:
+            return
+
+        table_name = AnalysisHistory.__tablename__
+        with self._engine.begin() as connection:
+            if not self._sqlite_table_exists(connection, table_name):
+                return
+            existing = self._sqlite_table_columns(connection, table_name)
+            additions = {
+                "model_used": "VARCHAR(128)",
+                "prompt_version_hash": "VARCHAR(16)",
+                "strategy_version": "VARCHAR(32)",
+            }
+            for column, declaration in additions.items():
+                if column not in existing:
+                    connection.exec_driver_sql(
+                        f'ALTER TABLE "{table_name}" ADD COLUMN {column} {declaration}'
+                    )
 
     def _ensure_ashare_snapshot_schema(self) -> None:
         """Upgrade the A-share snapshot table to the append-only schema on SQLite."""
@@ -1856,6 +1891,9 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                         secondary_buy=sniper_points.get("secondary_buy"),
                         stop_loss=sniper_points.get("stop_loss"),
                         take_profit=sniper_points.get("take_profit"),
+                        model_used=getattr(result, "model_used", None),
+                        prompt_version_hash=getattr(result, "prompt_version_hash", None),
+                        strategy_version=getattr(result, "strategy_version", None),
                         created_at=datetime.now(),
                     )
                 )

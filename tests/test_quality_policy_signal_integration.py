@@ -101,7 +101,10 @@ class QualityPolicySignalIntegrationTestCase(unittest.TestCase):
         record = generate_and_persist_signal(self.db, result=_result(), query_id="q3", market="cn")
 
         self.assertEqual(record.direction, "neutral")
+        self.assertEqual(record.action, "watch")
         self.assertEqual(record.entry_type, "none")
+        self.assertIsNone(record.stop_loss)
+        self.assertIsNone(record.take_profit)
         self.assertIn("core_blocks_observation_only", record.quality_constraints.get("policies", []))
 
 

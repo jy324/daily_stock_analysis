@@ -62,10 +62,14 @@ class ConstrainSignalTestCase(unittest.TestCase):
             self._precise_long(), _decision(("observation_only", {}), policy_id="core_degraded")
         )
         self.assertEqual(out.direction, "neutral")
+        self.assertEqual(out.action, "watch")
         self.assertEqual(out.entry_type, "none")
         self.assertIsNone(out.entry_price)
         self.assertIsNone(out.entry_low)
         self.assertIsNone(out.entry_high)
+        self.assertIsNone(out.position_size_pct)
+        self.assertIsNone(out.stop_loss)
+        self.assertIsNone(out.take_profit)
         self.assertIn("core_degraded", out.quality_constraints.get("policies", []))
 
     def test_cap_confidence_lowers_high_to_medium(self):
@@ -91,6 +95,7 @@ class ConstrainSignalTestCase(unittest.TestCase):
             ),
         )
         self.assertEqual(out.direction, "neutral")
+        self.assertEqual(out.action, "watch")
         self.assertEqual(out.entry_type, "none")
 
 

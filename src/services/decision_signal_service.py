@@ -286,12 +286,16 @@ def constrain_signal_with_quality_policy(
     if decision.observation_only:
         updates.update(
             direction="neutral",
+            action="watch",
+            position_size_pct=None,
             entry_type="none",
             entry_price=None,
             entry_low=None,
             entry_high=None,
+            stop_loss=None,
+            take_profit=None,
         )
-        effects.append("observation_only: 信号置为不可执行（direction=neutral, entry=none）")
+        effects.append("observation_only: 信号置为仅观察（action=watch, direction=neutral, entry=none）")
     elif decision.prohibit_precise_entry and signal.entry_type == "precise":
         updates.update(entry_type="none", entry_price=None)
         effects.append("prohibit_precise_entry: precise 入场降级为 none")

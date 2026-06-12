@@ -1,0 +1,60 @@
+# 数据质量决策策略（workflow C.1 Quality Policy Engine）
+#
+# 引擎根据只读的数据质量概览（各数据块 status + overall_score）和市场阶段，
+# 把数据质量从“仅展示”升级为对决策的硬约束。
+#
+# 语义：
+# - 每条策略的 trigger 下所有给定条件需同时满足（AND）；trigger 为空则永不触发。
+# - 删除/清空本文件 = 关闭全部策略，分析主流程不受影响（“不配置也可运行”）。
+# - 解析失败或单条策略无效时干净降级（记录日志并跳过），不会打断分析。
+#
+# 可用 trigger 条件：
+#   overall_score_below: <int>          # overall_score 已知且严格小于阈值时满足（未知分数不触发）
+#   block_status_in: {<block>: [...]}   # 指定数据块当前 status 命中列表时满足
+#   min_degraded_core_blocks: <int>     # 降级的核心块（quote/daily_bars/technical）数量 >= 阈值
+#   phase_in: [premarket, intraday, ...]# 市场阶段命中列表时满足
+#
+# 可用 action.type：
+#   prohibit_precise_entry       # 禁止精确入场价（C.2 将据此把 entry_type 收敛为区间/无）
+#   cap_confidence               # params.max_level: high|medium|low，取最紧上限
+#   downgrade_event_signal       # 事件驱动信号降级
+#   observation_only             # 仅输出观察报告，不出可执行买卖建议
+#   require_alert_confirmation   # 告警需二次确认（告警链路接入后生效）
+
+version: 1
+policies:
+  - id: quote_degraded_no_precise_entry
+    description: 行情数据 stale/fallback/获取失败时，禁止精确入场价。
+    trigger:
+      block_status_in:
+        quote: [stale, fallback, fetch_failed]
+    actions:
+      - type: prohibit_precise_entry
+
+  - id: fundamentals_missing_cap_confidence
+    description: 基本面数据缺失或获取失败时，中长期结论置信度上限为“中”。
+    trigger:
+      block_status_in:
+        fundamentals: [fetch_failed, missing]
+    actions:
+      - type: cap_confidence
+        params:
+          max_level: medium
+
+  - id: news_partial_downgrade_event
+    description: 新闻数据缺失或仅部分可用时，事件驱动信号降级。
+    trigger:
+      block_status_in:
+        news: [missing, partial]
+    actions:
+      - type: downgrade_event_signal
+
+  - id: core_blocks_observation_only
+    description: 行情/日线/技术中有两个及以上核心块降级时，仅输出观察报告，不出买卖建议。
+    trigger:
+      min_degraded_core_blocks: 2
+    actions:
+      - type: observation_only
+
+# 说明：告警数据源 fallback -> require_alert_confirmation 的策略待告警链路接入后再启用，
+# 其输入（告警数据质量）不在个股分析概览中，C.1 框架已支持该 action 类型。

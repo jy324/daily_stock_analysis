@@ -648,6 +648,10 @@ class Config:
     ashare_config_file: str = "config/ashare_intelligence.yaml"
     ashare_scoring_enabled: bool = False
 
+    # === 数据质量决策策略（workflow C.1）===
+    # 策略文件路径；文件缺失或解析失败 = 关闭全部策略，分析主流程不受影响。
+    quality_policy_file: str = "config/quality_policies.yaml"
+
     # === AI 分析配置 ===
     # LiteLLM unified model config (provider/model format, e.g. gemini/gemini-3.1-pro-preview)
     litellm_model: str = ""  # Primary model; must include provider prefix when set explicitly
@@ -1838,6 +1842,7 @@ class Config:
                 os.getenv('ASHARE_SCORING_ENABLED'),
                 default=False,
             ),
+            quality_policy_file=os.getenv('QUALITY_POLICY_FILE', 'config/quality_policies.yaml').strip() or 'config/quality_policies.yaml',
         )
     
     @classmethod

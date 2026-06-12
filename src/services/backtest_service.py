@@ -386,6 +386,55 @@ class BacktestService:
             return None
         return self._summary_to_dict(summary)
 
+    _ATTRIBUTION_DIMENSIONS = {"model": 1, "prompt": 2, "strategy": 3}
+
+    def get_performance_by_attribution(
+        self,
+        dimension: str,
+        *,
+        eval_window_days: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Aggregate backtest performance grouped by a version-attribution dimension.
+
+        ``dimension`` is one of ``model`` / ``prompt`` / ``strategy``; rows whose
+        attribution value is NULL are grouped under ``unknown`` (workflow D.3).
+        """
+        if dimension not in self._ATTRIBUTION_DIMENSIONS:
+            raise ValueError(
+                f"dimension must be one of {sorted(self._ATTRIBUTION_DIMENSIONS)}"
+            )
+        config = get_config()
+        engine_version = str(getattr(config, "backtest_engine_version", "v1"))
+        idx = self._ATTRIBUTION_DIMENSIONS[dimension]
+
+        rows = self.repo.list_results_with_attribution(
+            engine_version=engine_version, eval_window_days=eval_window_days
+        )
+        grouped: Dict[str, List[BacktestResult]] = {}
+        for tup in rows:
+            key = tup[idx] or "unknown"
+            grouped.setdefault(str(key), []).append(tup[0])
+
+        groups: List[Dict[str, Any]] = []
+        for key, results in sorted(grouped.items()):
+            window = (
+                int(eval_window_days)
+                if eval_window_days is not None
+                else int(getattr(results[0], "eval_window_days", 0) or 0)
+            )
+            summary = BacktestEngine.compute_summary(
+                results=results,
+                scope="attribution",
+                code=None,
+                eval_window_days=window,
+                engine_version=engine_version,
+            )
+            summary.pop("code", None)
+            summary["key"] = key
+            groups.append(summary)
+
+        return {"dimension": dimension, "engine_version": engine_version, "groups": groups}
+
     def get_global_summary(self, *, eval_window_days: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """Return overall backtest metrics normalized for Agent memory consumers."""
         return self._normalize_learning_summary(

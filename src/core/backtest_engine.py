@@ -47,6 +47,10 @@ class EvaluationConfig:
     eval_window_days: int
     neutral_band_pct: float = 2.0
     engine_version: str = "v1"
+    # Trading-cost model (workflow D.1b). Only applied for the v2 engine; v1 stays gross.
+    commission_rate: float = 0.0  # per side, fraction of notional
+    stamp_tax_rate: float = 0.0  # sell side only, fraction of notional
+    slippage_bp: float = 0.0  # per side, basis points
 
 
 class BacktestEngine:
@@ -154,6 +158,23 @@ class BacktestEngine:
             return "cash"
         return "cash"
 
+    @staticmethod
+    def round_trip_cost_pct(config: EvaluationConfig) -> float:
+        """Round-trip trading cost as a percentage of notional, for the v2 engine.
+
+        Buy side: commission + slippage. Sell side: commission + stamp tax + slippage.
+        Returns 0.0 for the v1 engine so legacy results stay gross.
+        """
+        if getattr(config, "engine_version", "v1") == "v1":
+            return 0.0
+        slippage_rate = float(config.slippage_bp) / 10000.0
+        total = (
+            2.0 * float(config.commission_rate)
+            + float(config.stamp_tax_rate)
+            + 2.0 * slippage_rate
+        )
+        return total * 100.0
+
     @classmethod
     def evaluate_single(
         cls,
@@ -236,13 +257,17 @@ class BacktestEngine:
         )
 
         simulated_entry_price = start_price if position == "long" else None
-        simulated_return_pct: Optional[float]
+        gross_return_pct: Optional[float]
         if position != "long":
-            simulated_return_pct = 0.0
+            gross_return_pct = 0.0
         elif simulated_exit_price is None:
-            simulated_return_pct = None
+            gross_return_pct = None
         else:
-            simulated_return_pct = (simulated_exit_price - start_price) / start_price * 100
+            gross_return_pct = (simulated_exit_price - start_price) / start_price * 100
+
+        # v2 trading cost applies only to an executed long round trip.
+        cost_pct = cls.round_trip_cost_pct(config) if (position == "long" and gross_return_pct is not None) else 0.0
+        simulated_return_pct = gross_return_pct - cost_pct if gross_return_pct is not None else None
 
         return {
             "analysis_date": analysis_date,
@@ -269,6 +294,7 @@ class BacktestEngine:
             "simulated_entry_price": simulated_entry_price,
             "simulated_exit_price": simulated_exit_price,
             "simulated_exit_reason": simulated_exit_reason,
+            "cost_pct": cost_pct,
             "simulated_return_pct": simulated_return_pct,
         }
 
@@ -465,6 +491,12 @@ class BacktestEngine:
         else:
             sim = cls._simulate_signal_execution(signal=signal, window=window, end_close=end_close)
 
+        # v2 trading cost applies only to an executed long round trip.
+        cost_pct = 0.0
+        if sim.get("entered") and sim.get("simulated_return_pct") is not None:
+            cost_pct = cls.round_trip_cost_pct(config)
+            sim["simulated_return_pct"] = sim["simulated_return_pct"] - cost_pct
+
         return {
             **base,
             "eval_window_days": eval_days,
@@ -478,6 +510,7 @@ class BacktestEngine:
             "outcome": outcome,
             "stop_loss": getattr(signal, "stop_loss", None),
             "take_profit": getattr(signal, "take_profit", None),
+            "cost_pct": cost_pct,
             **sim,
         }
 

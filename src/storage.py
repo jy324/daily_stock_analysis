@@ -513,6 +513,9 @@ class BacktestResult(Base):
     # 评估来源：True 表示消费结构化 DecisionSignal，False/NULL 表示关键词回退法（workflow B.3）
     signal_based = Column(Boolean, nullable=False, default=False)
 
+    # v2 交易成本（占名义本金百分比；仅 v2 引擎对已成交多头往返计提，workflow D.1b）
+    cost_pct = Column(Float)
+
     __table_args__ = (
         UniqueConstraint(
             'analysis_history_id',
@@ -1087,10 +1090,11 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     )
 
     def _ensure_backtest_signal_columns(self) -> None:
-        """Additively add the B.3 ``signal_based`` flag to an existing backtest_results table.
+        """Additively add the B.3/D.1b columns to an existing backtest_results table.
 
-        Fresh databases get it via ``create_all``; existing databases gain it through
-        ``ALTER TABLE ADD COLUMN`` with a default so legacy rows read as keyword-based.
+        Fresh databases get them via ``create_all``; existing databases gain them
+        through ``ALTER TABLE ADD COLUMN``. ``signal_based`` defaults to 0 so legacy
+        rows read as keyword-based; ``cost_pct`` reads NULL until recomputed under v2.
         Non-SQLite engines are left to ``create_all``.
         """
         if not self._is_sqlite_engine:
@@ -1104,6 +1108,10 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             if "signal_based" not in existing:
                 connection.exec_driver_sql(
                     f'ALTER TABLE "{table_name}" ADD COLUMN signal_based BOOLEAN NOT NULL DEFAULT 0'
+                )
+            if "cost_pct" not in existing:
+                connection.exec_driver_sql(
+                    f'ALTER TABLE "{table_name}" ADD COLUMN cost_pct FLOAT'
                 )
 
     def _ensure_backtest_summary_risk_columns(self) -> None:

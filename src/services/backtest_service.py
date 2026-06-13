@@ -12,6 +12,7 @@ from sqlalchemy import and_, select
 
 from src.config import get_config
 from src.core.backtest_engine import OVERALL_SENTINEL_CODE, BacktestEngine, EvaluationConfig
+from src.market_context import detect_market
 from src.market_phase_summary import extract_market_phase_summary, normalize_analysis_phase_bucket
 from src.repositories.backtest_repo import BacktestRepository
 from src.repositories.decision_signal_repo import DecisionSignalRepository
@@ -28,11 +29,16 @@ class BacktestService:
 
     MAX_DYNAMIC_SUMMARY_ROWS = 2000
 
+    # Fallback market->benchmark-index map used when the config file is absent.
+    _DEFAULT_BENCHMARK_MAP = {"cn": "000300"}
+
     def __init__(self, db_manager: Optional[DatabaseManager] = None):
         self.db = db_manager or DatabaseManager.get_instance()
         self.repo = BacktestRepository(self.db)
         self.stock_repo = StockRepository(self.db)
         self.signal_repo = DecisionSignalRepository(self.db)
+        self._benchmark_cache: Dict[Any, Tuple[Optional[str], Optional[float]]] = {}
+        self._benchmark_map_cache: Optional[Dict[str, str]] = None
 
     def run_backtest(
         self,
@@ -135,6 +141,15 @@ class BacktestService:
                         eval_window_days=int(eval_window_days),
                     )
 
+                # Benchmark excess is a v2 feature; v1 stays benchmark-free.
+                benchmark_code, benchmark_return_pct = (None, None)
+                if str(engine_version) != "v1":
+                    benchmark_code, benchmark_return_pct = self._resolve_benchmark(
+                        code=analysis.code,
+                        analysis_date=start_daily.date,
+                        eval_window_days=int(eval_window_days),
+                    )
+
                 # Prefer the structured DecisionSignal when one exists for this analysis;
                 # legacy records without a signal fall back to the keyword-inference path.
                 signal_record = self.signal_repo.get_latest_for_analysis(analysis.id)
@@ -145,6 +160,8 @@ class BacktestService:
                         start_price=float(start_daily.close),
                         forward_bars=forward_bars,
                         config=eval_config,
+                        benchmark_code=benchmark_code,
+                        benchmark_return_pct=benchmark_return_pct,
                     )
                 else:
                     evaluation = BacktestEngine.evaluate_single(
@@ -155,6 +172,8 @@ class BacktestService:
                         stop_loss=analysis.stop_loss,
                         take_profit=analysis.take_profit,
                         config=eval_config,
+                        benchmark_code=benchmark_code,
+                        benchmark_return_pct=benchmark_return_pct,
                     )
 
                 status = evaluation.get("eval_status")
@@ -197,6 +216,9 @@ class BacktestService:
                         simulated_return_pct=evaluation.get("simulated_return_pct"),
                         signal_based=bool(evaluation.get("signal_based", False)),
                         cost_pct=evaluation.get("cost_pct"),
+                        benchmark_code=evaluation.get("benchmark_code"),
+                        benchmark_return_pct=evaluation.get("benchmark_return_pct"),
+                        excess_return_pct=evaluation.get("excess_return_pct"),
                     )
                 )
 
@@ -628,6 +650,72 @@ class BacktestService:
         except Exception as exc:
             logger.warning(f"补全日线数据失败({code}): {exc}")
 
+    def _benchmark_map(self) -> Dict[str, str]:
+        """Load the market->benchmark-index map (config file, else built-in default)."""
+        if self._benchmark_map_cache is not None:
+            return self._benchmark_map_cache
+        mapping = dict(self._DEFAULT_BENCHMARK_MAP)
+        path = getattr(get_config(), "backtest_benchmark_file", "config/benchmark_config.yaml")
+        try:
+            import os
+
+            import yaml
+
+            if path and os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as fh:
+                    raw = yaml.safe_load(fh) or {}
+                benchmarks = raw.get("benchmarks") if isinstance(raw, dict) else None
+                if isinstance(benchmarks, dict):
+                    mapping = {
+                        str(k).strip().lower(): str(v).strip()
+                        for k, v in benchmarks.items()
+                        if v
+                    }
+        except Exception as exc:
+            logger.warning("基准映射文件解析失败，使用内置默认(%s): %s", path, exc)
+        self._benchmark_map_cache = mapping
+        return mapping
+
+    def _resolve_benchmark(
+        self, *, code: str, analysis_date: date, eval_window_days: int
+    ) -> Tuple[Optional[str], Optional[float]]:
+        """Resolve (benchmark_code, benchmark_return_pct) over the same forward window.
+
+        Best-effort: maps the stock's market to a benchmark index, then reuses the
+        daily-bar layer to compute the index return. Unavailable index data yields
+        ``(index_code, None)`` (or ``(None, None)`` for unmapped markets) and never
+        blocks the backtest.
+        """
+        index_code = self._benchmark_map().get(detect_market(code))
+        if not index_code:
+            return None, None
+        cache_key = (index_code, analysis_date, int(eval_window_days))
+        if cache_key in self._benchmark_cache:
+            return self._benchmark_cache[cache_key]
+
+        benchmark_return: Optional[float] = None
+        try:
+            idx_start = self.stock_repo.get_start_daily(code=index_code, analysis_date=analysis_date)
+            if idx_start is None or idx_start.close is None:
+                self._try_fill_daily_data(code=index_code, analysis_date=analysis_date, eval_window_days=eval_window_days)
+                idx_start = self.stock_repo.get_start_daily(code=index_code, analysis_date=analysis_date)
+            if idx_start is not None and idx_start.close:
+                bars = self.stock_repo.get_forward_bars(
+                    code=index_code, analysis_date=idx_start.date, eval_window_days=int(eval_window_days)
+                )
+                if len(bars) >= int(eval_window_days):
+                    end_close = bars[int(eval_window_days) - 1].close
+                    if end_close is not None:
+                        benchmark_return = (float(end_close) - float(idx_start.close)) / float(idx_start.close) * 100
+            if benchmark_return is None:
+                logger.warning("基准指数收益不可得(%s @ %s)，excess 记 NULL", index_code, analysis_date)
+        except Exception as exc:
+            logger.warning("基准指数收益获取失败(%s): %s", index_code, exc)
+
+        result = (index_code, benchmark_return)
+        self._benchmark_cache[cache_key] = result
+        return result
+
     def _recompute_summaries(self, *, touched_codes: List[str], eval_window_days: int, engine_version: str) -> None:
         with self.db.get_session() as session:
             # overall
@@ -763,6 +851,9 @@ class BacktestService:
             "simulated_return_pct": row.simulated_return_pct,
             "signal_based": bool(getattr(row, "signal_based", False)),
             "cost_pct": getattr(row, "cost_pct", None),
+            "benchmark_code": getattr(row, "benchmark_code", None),
+            "benchmark_return_pct": getattr(row, "benchmark_return_pct", None),
+            "excess_return_pct": getattr(row, "excess_return_pct", None),
         }
 
     @staticmethod

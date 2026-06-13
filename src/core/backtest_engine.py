@@ -159,6 +159,27 @@ class BacktestEngine:
         return "cash"
 
     @staticmethod
+    def _benchmark_fields(
+        benchmark_code: Optional[str],
+        benchmark_return_pct: Optional[float],
+        simulated_return_pct: Optional[float],
+    ) -> Dict[str, Any]:
+        """Benchmark code/return plus the strategy's excess over the benchmark.
+
+        Excess is the realized (simulated) return minus the benchmark return; it is
+        ``None`` when either side is missing. ``benchmark_code`` is preserved even when
+        the benchmark return is unavailable so the attempted benchmark is auditable.
+        """
+        excess = None
+        if benchmark_return_pct is not None and simulated_return_pct is not None:
+            excess = simulated_return_pct - benchmark_return_pct
+        return {
+            "benchmark_code": benchmark_code,
+            "benchmark_return_pct": benchmark_return_pct,
+            "excess_return_pct": excess,
+        }
+
+    @staticmethod
     def round_trip_cost_pct(config: EvaluationConfig) -> float:
         """Round-trip trading cost as a percentage of notional, for the v2 engine.
 
@@ -186,6 +207,8 @@ class BacktestEngine:
         stop_loss: Optional[float],
         take_profit: Optional[float],
         config: EvaluationConfig,
+        benchmark_code: Optional[str] = None,
+        benchmark_return_pct: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Evaluate one historical analysis against forward daily bars.
 
@@ -296,6 +319,7 @@ class BacktestEngine:
             "simulated_exit_reason": simulated_exit_reason,
             "cost_pct": cost_pct,
             "simulated_return_pct": simulated_return_pct,
+            **cls._benchmark_fields(benchmark_code, benchmark_return_pct, simulated_return_pct),
         }
 
     @staticmethod
@@ -423,6 +447,8 @@ class BacktestEngine:
         start_price: float,
         forward_bars: Sequence[DailyBarLike],
         config: EvaluationConfig,
+        benchmark_code: Optional[str] = None,
+        benchmark_return_pct: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Evaluate a historical analysis using its structured DecisionSignal.
 
@@ -512,6 +538,7 @@ class BacktestEngine:
             "take_profit": getattr(signal, "take_profit", None),
             "cost_pct": cost_pct,
             **sim,
+            **cls._benchmark_fields(benchmark_code, benchmark_return_pct, sim.get("simulated_return_pct")),
         }
 
     @classmethod

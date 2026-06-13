@@ -159,6 +159,17 @@ class BacktestEngine:
         return "cash"
 
     @staticmethod
+    def _is_sealed_bar(bar: Any) -> bool:
+        """Whether a bar is a one-price sealed board (limit-up/down with no range).
+
+        A sealed limit board has no intraday range (high == low), so a fill at that
+        bar could not realistically have been achieved (workflow D.1c).
+        """
+        high = getattr(bar, "high", None)
+        low = getattr(bar, "low", None)
+        return high is not None and low is not None and high == low
+
+    @staticmethod
     def _benchmark_fields(
         benchmark_code: Optional[str],
         benchmark_return_pct: Optional[float],
@@ -292,6 +303,15 @@ class BacktestEngine:
         cost_pct = cls.round_trip_cost_pct(config) if (position == "long" and gross_return_pct is not None) else 0.0
         simulated_return_pct = gross_return_pct - cost_pct if gross_return_pct is not None else None
 
+        # Unfillable (v2): the long exit landed on a sealed limit board.
+        unfillable: Optional[bool] = None
+        if config.engine_version != "v1":
+            unfillable = bool(
+                position == "long"
+                and first_hit_date is not None
+                and any(b.date == first_hit_date and cls._is_sealed_bar(b) for b in window_bars)
+            )
+
         return {
             "analysis_date": analysis_date,
             "eval_window_days": eval_days,
@@ -319,6 +339,7 @@ class BacktestEngine:
             "simulated_exit_reason": simulated_exit_reason,
             "cost_pct": cost_pct,
             "simulated_return_pct": simulated_return_pct,
+            "unfillable": unfillable,
             **cls._benchmark_fields(benchmark_code, benchmark_return_pct, simulated_return_pct),
         }
 
@@ -366,6 +387,7 @@ class BacktestEngine:
         first_hit = "neither"
         hit_sl: Optional[bool] = None if stop_loss is None else False
         hit_tp: Optional[bool] = None if take_profit is None else False
+        sealed_fill = False
 
         for idx, bar in enumerate(window, start=1):
             if is_terminal_state(working.state):
@@ -379,7 +401,11 @@ class BacktestEngine:
             working = working.model_copy(update={"state": advance.to_state})
             if advance.entered_price is not None:
                 entered_price = advance.entered_price
+                if cls._is_sealed_bar(bar):
+                    sealed_fill = True
             if advance.closed_price is not None:
+                if cls._is_sealed_bar(bar):
+                    sealed_fill = True
                 exit_price = advance.closed_price
                 exit_days = idx
                 exit_date = bar.date
@@ -413,6 +439,7 @@ class BacktestEngine:
                 "first_hit_date": None,
                 "first_hit_trading_days": None,
                 "entered": False,
+                "sealed_fill": False,
             }
 
         if exit_price is None:
@@ -436,6 +463,7 @@ class BacktestEngine:
             "first_hit_date": exit_date,
             "first_hit_trading_days": exit_days,
             "entered": True,
+            "sealed_fill": sealed_fill,
         }
 
     @classmethod
@@ -523,7 +551,12 @@ class BacktestEngine:
             cost_pct = cls.round_trip_cost_pct(config)
             sim["simulated_return_pct"] = sim["simulated_return_pct"] - cost_pct
 
+        # Unfillable (sealed limit board) is a v2-only realism flag.
+        sealed_fill = bool(sim.pop("sealed_fill", False))
+        unfillable = sealed_fill if config.engine_version != "v1" else None
+
         return {
+            "unfillable": unfillable,
             **base,
             "eval_window_days": eval_days,
             "eval_status": "completed",

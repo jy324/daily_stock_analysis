@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 - [新功能] 回测 v2 引擎新增基准超额：按个股市场映射基准指数（默认 A股→沪深300，`config/benchmark_config.yaml` 可配置），复用日线层在同一前向窗口计算指数收益，得到 `excess_return_pct = 模拟收益 - 基准收益`；`backtest_results` 追加 `benchmark_code/benchmark_return_pct/excess_return_pct` 列迁移，指数不可得记 NULL 并告警、不阻断回测，v1 不计基准。
+- [新功能] 回测 v2 引擎新增不可成交标记：入场/出场落在涨跌停封板（一价无区间）日时记 `unfillable=True`，`backtest_results` 追加 `unfillable` 列迁移；v1 不评估（NULL），不改变模拟收益，仅作可成交性提示。
 
 - [新功能] 回测新增按版本归因维度（model/prompt/strategy）的表现聚合：repo 关联 `analysis_history` 归因列分组、service `get_performance_by_attribution` 逐组计算汇总，新增 `GET /api/v1/backtest/performance/by/{dimension}`（追加式，旧响应不变），NULL 归因归入 `unknown`。
 

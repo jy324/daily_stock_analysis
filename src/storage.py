@@ -521,6 +521,9 @@ class BacktestResult(Base):
     benchmark_return_pct = Column(Float)
     excess_return_pct = Column(Float)
 
+    # v2 不可成交标记（workflow D.1c）：入场/出场落在涨跌停封板（一价无区间）日，NULL=未评估(v1)
+    unfillable = Column(Boolean)
+
     __table_args__ = (
         UniqueConstraint(
             'analysis_history_id',
@@ -1122,6 +1125,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 ("benchmark_code", "VARCHAR(16)"),
                 ("benchmark_return_pct", "FLOAT"),
                 ("excess_return_pct", "FLOAT"),
+                ("unfillable", "BOOLEAN"),
             ):
                 if column not in existing:
                     connection.exec_driver_sql(

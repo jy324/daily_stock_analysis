@@ -219,6 +219,7 @@ class BacktestService:
                         benchmark_code=evaluation.get("benchmark_code"),
                         benchmark_return_pct=evaluation.get("benchmark_return_pct"),
                         excess_return_pct=evaluation.get("excess_return_pct"),
+                        unfillable=evaluation.get("unfillable"),
                     )
                 )
 
@@ -854,6 +855,7 @@ class BacktestService:
             "benchmark_code": getattr(row, "benchmark_code", None),
             "benchmark_return_pct": getattr(row, "benchmark_return_pct", None),
             "excess_return_pct": getattr(row, "excess_return_pct", None),
+            "unfillable": getattr(row, "unfillable", None),
         }
 
     @staticmethod

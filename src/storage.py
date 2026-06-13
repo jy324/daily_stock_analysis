@@ -513,6 +513,9 @@ class BacktestResult(Base):
     # 评估来源：True 表示消费结构化 DecisionSignal，False/NULL 表示关键词回退法（workflow B.3）
     signal_based = Column(Boolean, nullable=False, default=False)
 
+    # v2 交易成本（占名义本金百分比；仅 v2 引擎对已成交多头往返计提，workflow D.1b）
+    cost_pct = Column(Float)
+
     __table_args__ = (
         UniqueConstraint(
             'analysis_history_id',
@@ -563,6 +566,16 @@ class BacktestSummary(Base):
     take_profit_trigger_rate = Column(Float)
     ambiguous_rate = Column(Float)
     avg_days_to_first_hit = Column(Float)
+
+    # 风险/收益指标（workflow D.1a，基于已完成交易的模拟收益序列）
+    max_drawdown_pct = Column(Float)
+    volatility_pct = Column(Float)
+    sharpe = Column(Float)
+    sortino = Column(Float)
+    calmar = Column(Float)
+    profit_factor = Column(Float)
+    payoff_ratio = Column(Float)
+    holding_period_stats_json = Column(Text)
 
     # 诊断字段（JSON 字符串）
     advice_breakdown_json = Column(Text)
@@ -1027,6 +1040,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._ensure_ashare_snapshot_schema()
             self._ensure_decision_signal_lifecycle_columns()
             self._ensure_backtest_signal_columns()
+            self._ensure_backtest_summary_risk_columns()
             self._ensure_analysis_history_attribution_columns()
             self._ensure_schema_migration_record()
 
@@ -1076,10 +1090,11 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                     )
 
     def _ensure_backtest_signal_columns(self) -> None:
-        """Additively add the B.3 ``signal_based`` flag to an existing backtest_results table.
+        """Additively add the B.3/D.1b columns to an existing backtest_results table.
 
-        Fresh databases get it via ``create_all``; existing databases gain it through
-        ``ALTER TABLE ADD COLUMN`` with a default so legacy rows read as keyword-based.
+        Fresh databases get them via ``create_all``; existing databases gain them
+        through ``ALTER TABLE ADD COLUMN``. ``signal_based`` defaults to 0 so legacy
+        rows read as keyword-based; ``cost_pct`` reads NULL until recomputed under v2.
         Non-SQLite engines are left to ``create_all``.
         """
         if not self._is_sqlite_engine:
@@ -1094,6 +1109,41 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 connection.exec_driver_sql(
                     f'ALTER TABLE "{table_name}" ADD COLUMN signal_based BOOLEAN NOT NULL DEFAULT 0'
                 )
+            if "cost_pct" not in existing:
+                connection.exec_driver_sql(
+                    f'ALTER TABLE "{table_name}" ADD COLUMN cost_pct FLOAT'
+                )
+
+    def _ensure_backtest_summary_risk_columns(self) -> None:
+        """Additively add the D.1a risk/return metric columns to backtest_summaries.
+
+        Fresh databases get these via ``create_all``; existing databases gain them
+        through ``ALTER TABLE ADD COLUMN`` (no-rewrite on SQLite). Legacy summary rows
+        read NULL until recomputed.
+        """
+        if not self._is_sqlite_engine:
+            return
+
+        table_name = BacktestSummary.__tablename__
+        with self._engine.begin() as connection:
+            if not self._sqlite_table_exists(connection, table_name):
+                return
+            existing = self._sqlite_table_columns(connection, table_name)
+            additions = {
+                "max_drawdown_pct": "FLOAT",
+                "volatility_pct": "FLOAT",
+                "sharpe": "FLOAT",
+                "sortino": "FLOAT",
+                "calmar": "FLOAT",
+                "profit_factor": "FLOAT",
+                "payoff_ratio": "FLOAT",
+                "holding_period_stats_json": "TEXT",
+            }
+            for column, declaration in additions.items():
+                if column not in existing:
+                    connection.exec_driver_sql(
+                        f'ALTER TABLE "{table_name}" ADD COLUMN {column} {declaration}'
+                    )
 
     def _ensure_analysis_history_attribution_columns(self) -> None:
         """Additively add the D.2 version-attribution columns to analysis_history.

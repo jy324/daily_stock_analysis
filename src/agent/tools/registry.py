@@ -110,6 +110,28 @@ class ToolRegistry:
         """Return a tool definition by name."""
         return self._tools.get(name)
 
+    def resolve_name(self, name: str) -> Optional[str]:
+        """Return the registered tool name for an execution request.
+
+        Gemini may return OpenAPI-style names such as
+        ``default_api:get_realtime_quote`` even though the registry exposes the
+        plain tool name. Keep that compatibility path narrow so arbitrary
+        namespaces do not bypass guards that inspect the registered tool
+        definition before execution.
+        """
+        if name in self._tools:
+            return name
+        if name.startswith("default_api:"):
+            candidate = name.split(":", 1)[-1]
+            if candidate in self._tools:
+                return candidate
+        return None
+
+    def resolve(self, name: str) -> Optional[ToolDefinition]:
+        """Return a tool definition for a supported execution name."""
+        resolved_name = self.resolve_name(name)
+        return self._tools.get(resolved_name) if resolved_name else None
+
     def list_tools(self, category: Optional[str] = None) -> List[ToolDefinition]:
         """List all tools, optionally filtered by category."""
         tools = list(self._tools.values())
@@ -142,12 +164,10 @@ class ToolRegistry:
         Raises ``KeyError`` if tool not found.
         Raises the handler's exception on execution failure.
 
-        Supports Gemini namespaced tool names (e.g. default_api:get_realtime_quote -> get_realtime_quote).
+        Supports Gemini ``default_api:`` namespaced tool names while rejecting
+        other namespace shapes.
         """
-        tool_def = self._tools.get(name)
-        if tool_def is None and ":" in name:
-            # Gemini may return namespaced names like default_api:get_realtime_quote
-            tool_def = self._tools.get(name.split(":", 1)[-1])
+        tool_def = self.resolve(name)
         if tool_def is None:
             raise KeyError(f"Tool '{name}' not found in registry. Available: {self.list_names()}")
 

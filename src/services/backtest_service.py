@@ -57,6 +57,9 @@ class BacktestService:
             eval_window_days=int(eval_window_days),
             neutral_band_pct=neutral_band_pct,
             engine_version=str(engine_version),
+            commission_rate=float(getattr(config, "backtest_commission_rate", 0.0)),
+            stamp_tax_rate=float(getattr(config, "backtest_stamp_tax_rate", 0.0)),
+            slippage_bp=float(getattr(config, "backtest_slippage_bp", 0.0)),
         )
 
         candidates = self.repo.get_candidates(
@@ -193,6 +196,7 @@ class BacktestService:
                         simulated_exit_reason=evaluation.get("simulated_exit_reason"),
                         simulated_return_pct=evaluation.get("simulated_return_pct"),
                         signal_based=bool(evaluation.get("signal_based", False)),
+                        cost_pct=evaluation.get("cost_pct"),
                     )
                 )
 
@@ -693,6 +697,14 @@ class BacktestService:
             take_profit_trigger_rate=summary_data.get("take_profit_trigger_rate"),
             ambiguous_rate=summary_data.get("ambiguous_rate"),
             avg_days_to_first_hit=summary_data.get("avg_days_to_first_hit"),
+            max_drawdown_pct=summary_data.get("max_drawdown_pct"),
+            volatility_pct=summary_data.get("volatility_pct"),
+            sharpe=summary_data.get("sharpe"),
+            sortino=summary_data.get("sortino"),
+            calmar=summary_data.get("calmar"),
+            profit_factor=summary_data.get("profit_factor"),
+            payoff_ratio=summary_data.get("payoff_ratio"),
+            holding_period_stats_json=json.dumps(summary_data.get("holding_period_stats") or {}, ensure_ascii=False),
             advice_breakdown_json=json.dumps(summary_data.get("advice_breakdown") or {}, ensure_ascii=False),
             diagnostics_json=json.dumps(summary_data.get("diagnostics") or {}, ensure_ascii=False),
         )
@@ -753,6 +765,7 @@ class BacktestService:
             "simulated_exit_reason": row.simulated_exit_reason,
             "simulated_return_pct": row.simulated_return_pct,
             "signal_based": bool(getattr(row, "signal_based", False)),
+            "cost_pct": getattr(row, "cost_pct", None),
         }
 
     @staticmethod
@@ -780,6 +793,14 @@ class BacktestService:
             "take_profit_trigger_rate": row.take_profit_trigger_rate,
             "ambiguous_rate": row.ambiguous_rate,
             "avg_days_to_first_hit": row.avg_days_to_first_hit,
+            "max_drawdown_pct": row.max_drawdown_pct,
+            "volatility_pct": row.volatility_pct,
+            "sharpe": row.sharpe,
+            "sortino": row.sortino,
+            "calmar": row.calmar,
+            "profit_factor": row.profit_factor,
+            "payoff_ratio": row.payoff_ratio,
+            "holding_period_stats": json.loads(row.holding_period_stats_json) if row.holding_period_stats_json else {},
             "advice_breakdown": json.loads(row.advice_breakdown_json) if row.advice_breakdown_json else {},
             "diagnostics": json.loads(row.diagnostics_json) if row.diagnostics_json else {},
         }

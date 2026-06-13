@@ -896,6 +896,10 @@ class Config:
     backtest_min_age_days: int = 14
     backtest_engine_version: str = "v1"
     backtest_neutral_band_pct: float = 2.0
+    # v2 交易成本模型（A 股默认费率；仅 v2 引擎生效，workflow D.1b）
+    backtest_commission_rate: float = 0.00025  # 单边佣金率
+    backtest_stamp_tax_rate: float = 0.0005  # 印花税（仅卖出单边）
+    backtest_slippage_bp: float = 0.0  # 单边滑点（基点）
     
     # === 日志配置 ===
     log_dir: str = "./logs"  # 日志文件目录
@@ -1700,6 +1704,18 @@ class Config:
                 2.0,
                 field_name='BACKTEST_NEUTRAL_BAND_PCT',
                 minimum=0.0,
+            ),
+            backtest_commission_rate=parse_env_float(
+                os.getenv('BACKTEST_COMMISSION_RATE'), 0.00025,
+                field_name='BACKTEST_COMMISSION_RATE', minimum=0.0,
+            ),
+            backtest_stamp_tax_rate=parse_env_float(
+                os.getenv('BACKTEST_STAMP_TAX_RATE'), 0.0005,
+                field_name='BACKTEST_STAMP_TAX_RATE', minimum=0.0,
+            ),
+            backtest_slippage_bp=parse_env_float(
+                os.getenv('BACKTEST_SLIPPAGE_BP'), 0.0,
+                field_name='BACKTEST_SLIPPAGE_BP', minimum=0.0,
             ),
             log_dir=os.getenv('LOG_DIR', './logs'),
             log_level=os.getenv('LOG_LEVEL', 'INFO'),

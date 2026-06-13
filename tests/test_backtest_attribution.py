@@ -28,12 +28,13 @@ class BacktestAttributionTestCase(unittest.TestCase):
     def _seed(self):
         with self.db.get_session() as session:
             specs = [
-                # (id, model_used, strategy_version, prompt_version_hash, outcome, sim_return)
-                ("m1", "s1", "p1", "win", 10.0),
-                ("m2", "s1", "p2", "loss", -5.0),
-                (None, None, None, "win", 3.0),  # unknown attribution
+                # (id, model_used, strategy_version, prompt_version_hash, eval_window_days, outcome, sim_return)
+                ("m1", "s1", "p1", 10, "win", 10.0),
+                ("m2", "s1", "p2", 10, "loss", -5.0),
+                (None, None, None, 10, "win", 3.0),  # unknown attribution
+                ("m1", "s1", "p1", 30, "loss", -20.0),
             ]
-            for i, (model, strat, prompt, outcome, ret) in enumerate(specs, start=1):
+            for i, (model, strat, prompt, window, outcome, ret) in enumerate(specs, start=1):
                 session.add(
                     AnalysisHistory(
                         id=i, query_id=f"q{i}", code="600519", name="x",
@@ -45,7 +46,7 @@ class BacktestAttributionTestCase(unittest.TestCase):
                 session.add(
                     BacktestResult(
                         analysis_history_id=i, code="600519", analysis_date=date(2024, 1, 1),
-                        eval_window_days=10, engine_version="v1", eval_status="completed",
+                        eval_window_days=window, engine_version="v1", eval_status="completed",
                         operation_advice="买入", position_recommendation="long",
                         outcome=outcome, direction_correct=(outcome == "win"),
                         stock_return_pct=ret, simulated_return_pct=ret,
@@ -60,8 +61,24 @@ class BacktestAttributionTestCase(unittest.TestCase):
         self.assertEqual(set(groups), {"m1", "m2", "unknown"})
         self.assertEqual(groups["m1"]["total_evaluations"], 1)
         self.assertEqual(groups["m1"]["win_count"], 1)
+        self.assertEqual(groups["m1"]["eval_window_days"], 10)
         self.assertEqual(groups["m2"]["loss_count"], 1)
         self.assertEqual(groups["unknown"]["win_count"], 1)
+
+    def test_default_eval_window_does_not_mix_multiple_windows(self):
+        result = self.service.get_performance_by_attribution("model")
+        groups = {g["key"]: g for g in result["groups"]}
+
+        self.assertEqual(groups["m1"]["eval_window_days"], 10)
+        self.assertEqual(groups["m1"]["total_evaluations"], 1)
+        self.assertEqual(groups["m1"]["win_count"], 1)
+
+        result_30d = self.service.get_performance_by_attribution("model", eval_window_days=30)
+        groups_30d = {g["key"]: g for g in result_30d["groups"]}
+        self.assertEqual(set(groups_30d), {"m1"})
+        self.assertEqual(groups_30d["m1"]["eval_window_days"], 30)
+        self.assertEqual(groups_30d["m1"]["total_evaluations"], 1)
+        self.assertEqual(groups_30d["m1"]["loss_count"], 1)
 
     def test_group_by_strategy_aggregates(self):
         result = self.service.get_performance_by_attribution("strategy")

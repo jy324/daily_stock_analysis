@@ -409,6 +409,8 @@ class BacktestService:
             )
         config = get_config()
         engine_version = str(getattr(config, "backtest_engine_version", "v1"))
+        if eval_window_days is None:
+            eval_window_days = int(getattr(config, "backtest_eval_window_days", 10))
         idx = self._ATTRIBUTION_DIMENSIONS[dimension]
 
         rows = self.repo.list_results_with_attribution(
@@ -421,16 +423,11 @@ class BacktestService:
 
         groups: List[Dict[str, Any]] = []
         for key, results in sorted(grouped.items()):
-            window = (
-                int(eval_window_days)
-                if eval_window_days is not None
-                else int(getattr(results[0], "eval_window_days", 0) or 0)
-            )
             summary = BacktestEngine.compute_summary(
                 results=results,
                 scope="attribution",
                 code=None,
-                eval_window_days=window,
+                eval_window_days=int(eval_window_days),
                 engine_version=engine_version,
             )
             summary.pop("code", None)

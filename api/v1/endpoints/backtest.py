@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.deps import get_database_manager
 from api.v1.schemas.backtest import (
+    AttributionPerformanceResponse,
     BacktestRunRequest,
     BacktestRunResponse,
     BacktestResultItem,
@@ -126,6 +127,41 @@ def get_backtest_results(
         raise HTTPException(
             status_code=500,
             detail={"error": "internal_error", "message": f"查询回测结果失败: {str(exc)}"},
+        )
+
+
+BacktestAttributionDimension = Literal["model", "prompt", "strategy"]
+
+
+@router.get(
+    "/performance/by/{dimension}",
+    response_model=AttributionPerformanceResponse,
+    responses={
+        200: {"description": "按模型/prompt/策略版本归因的回测表现"},
+        400: {"description": "请求参数错误", "model": ErrorResponse},
+        500: {"description": "服务器错误", "model": ErrorResponse},
+    },
+    summary="按版本归因维度查询回测表现",
+)
+def get_performance_by_attribution(
+    dimension: BacktestAttributionDimension,
+    eval_window_days: Optional[int] = Query(None, ge=1, le=120, description="评估窗口过滤"),
+    db_manager: DatabaseManager = Depends(get_database_manager),
+) -> AttributionPerformanceResponse:
+    try:
+        service = BacktestService(db_manager)
+        result = service.get_performance_by_attribution(dimension, eval_window_days=eval_window_days)
+        return AttributionPerformanceResponse(**result)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "invalid_params", "message": str(exc)},
+        )
+    except Exception as exc:
+        logger.error(f"按归因维度查询回测表现失败: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "internal_error", "message": f"查询归因表现失败: {str(exc)}"},
         )
 
 

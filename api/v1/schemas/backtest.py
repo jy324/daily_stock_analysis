@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from api.v1.schemas.market_phase import MarketPhaseSummary
 from src.schemas.decision_action import DecisionAction
@@ -102,3 +102,30 @@ class PerformanceMetrics(BaseModel):
 
     advice_breakdown: Dict[str, Any] = Field(default_factory=dict)
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AttributionPerformanceGroup(BaseModel):
+    """Per-group backtest performance for one attribution value (workflow D.3).
+
+    ``extra='allow'`` lets the full summary metric set (including risk metrics)
+    pass through without re-declaring every field here.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    key: str
+    engine_version: str
+    total_evaluations: int
+    completed_count: int
+    win_count: int
+    loss_count: int
+    neutral_count: int
+    win_rate_pct: Optional[float] = None
+    direction_accuracy_pct: Optional[float] = None
+    avg_simulated_return_pct: Optional[float] = None
+
+
+class AttributionPerformanceResponse(BaseModel):
+    dimension: str
+    engine_version: str
+    groups: List[AttributionPerformanceGroup] = Field(default_factory=list)

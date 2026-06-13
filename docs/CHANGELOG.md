@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新功能] 回测新增按版本归因维度（model/prompt/strategy）的表现聚合：repo 关联 `analysis_history` 归因列分组、service `get_performance_by_attribution` 逐组计算汇总，新增 `GET /api/v1/backtest/performance/by/{dimension}`（追加式，旧响应不变），NULL 归因归入 `unknown`。
+
 - [新功能] 回测汇总新增风险/收益指标：最大回撤、波动率、夏普、索提诺、卡玛、盈利因子、盈亏比与持有期统计（基于已完成交易的模拟收益序列、按确定性公式计算），`backtest_summaries` 追加列迁移，旧汇总行 NULL 直至重算；不改 per-result 语义、不升 engine_version。
 - [新功能] 回测引擎新增 v2 交易成本模型（佣金双边 + 印花税卖出单边 + 滑点），对已成交多头往返按 A 股默认费率计提净收益并记录 `cost_pct`；默认 `engine_version=v1` 保持毛收益不变，需显式设 `BACKTEST_ENGINE_VERSION=v2` 启用（opt-in），`backtest_results` 追加 `cost_pct` 列迁移。
 - [修复] 问股从历史报告进入后的追问会持续携带当前标的，切回或重载已有会话时可从历史消息恢复基础当前标的，并由后端阻断未明确切换时的错误股票工具调用、交易所片段和指标缩写误路由。

@@ -288,6 +288,38 @@ class BacktestRepository:
             rows = session.execute(query).scalars().all()
             return list(rows)
 
+    def list_results_with_attribution(
+        self,
+        *,
+        engine_version: str,
+        eval_window_days: Optional[int] = None,
+    ) -> List[Tuple[BacktestResult, Optional[str], Optional[str], Optional[str]]]:
+        """Return backtest results joined with their analysis version-attribution.
+
+        Each row is ``(BacktestResult, model_used, prompt_version_hash, strategy_version)``.
+        Used to aggregate performance by model / prompt / strategy (workflow D.3).
+        """
+        with self.db.get_session() as session:
+            conditions = [BacktestResult.engine_version == engine_version]
+            if eval_window_days is not None:
+                conditions.append(BacktestResult.eval_window_days == int(eval_window_days))
+            query = (
+                select(
+                    BacktestResult,
+                    AnalysisHistory.model_used,
+                    AnalysisHistory.prompt_version_hash,
+                    AnalysisHistory.strategy_version,
+                )
+                .join(AnalysisHistory, BacktestResult.analysis_history_id == AnalysisHistory.id)
+                .where(and_(*conditions))
+            )
+            rows = session.execute(query).all()
+            out: List[Tuple[BacktestResult, Optional[str], Optional[str], Optional[str]]] = []
+            for result, model_used, prompt_hash, strategy_version in rows:
+                session.expunge(result)
+                out.append((result, model_used, prompt_hash, strategy_version))
+            return out
+
     def upsert_summary(self, summary: BacktestSummary) -> None:
         """Insert or replace summary row by unique key."""
         with self.db.get_session() as session:

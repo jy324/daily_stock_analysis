@@ -65,6 +65,6 @@ lxml_html_clean             # Fix for lxml.html.clean ImportError in newer lxml 
 jinja2>=3.1.0               # Jinja2 template engine for report rendering
 
 # FastAPI Web framework
-fastapi>=0.109.0            # Modern Python Web framework
+fastapi>=0.109.0,<0.137.0   # Modern Python Web framework; 0.137+ rejects the empty-path routes in api/v1/endpoints/history.py at import (migrate routes, then relax)
 uvicorn[standard]>=0.27.0   # ASGI server
 python-multipart>=0.0.6     # FastAPI File/Form upload support

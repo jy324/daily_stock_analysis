@@ -220,6 +220,8 @@ class BacktestEngine:
         config: EvaluationConfig,
         benchmark_code: Optional[str] = None,
         benchmark_return_pct: Optional[float] = None,
+        start_high: Optional[float] = None,
+        start_low: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Evaluate one historical analysis against forward daily bars.
 
@@ -303,14 +305,17 @@ class BacktestEngine:
         cost_pct = cls.round_trip_cost_pct(config) if (position == "long" and gross_return_pct is not None) else 0.0
         simulated_return_pct = gross_return_pct - cost_pct if gross_return_pct is not None else None
 
-        # Unfillable (v2): the long exit landed on a sealed limit board.
+        # Unfillable (v2): the long entry day was itself a sealed limit board (the
+        # assumed fill at start_price was impossible) or the long exit landed on one.
         unfillable: Optional[bool] = None
-        if config.engine_version != "v1":
-            unfillable = bool(
-                position == "long"
-                and first_hit_date is not None
-                and any(b.date == first_hit_date and cls._is_sealed_bar(b) for b in window_bars)
+        if config.engine_version != "v1" and position == "long":
+            entry_sealed = (
+                start_high is not None and start_low is not None and start_high == start_low
             )
+            exit_sealed = first_hit_date is not None and any(
+                b.date == first_hit_date and cls._is_sealed_bar(b) for b in window_bars
+            )
+            unfillable = bool(entry_sealed or exit_sealed)
 
         return {
             "analysis_date": analysis_date,

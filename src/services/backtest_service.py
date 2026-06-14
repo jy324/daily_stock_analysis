@@ -168,6 +168,8 @@ class BacktestService:
                         operation_advice=analysis.operation_advice,
                         analysis_date=start_daily.date,
                         start_price=float(start_daily.close),
+                        start_high=float(start_daily.high) if start_daily.high is not None else None,
+                        start_low=float(start_daily.low) if start_daily.low is not None else None,
                         forward_bars=forward_bars,
                         stop_loss=analysis.stop_loss,
                         take_profit=analysis.take_profit,

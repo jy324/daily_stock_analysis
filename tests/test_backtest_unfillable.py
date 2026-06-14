@@ -88,6 +88,45 @@ class EvaluateSingleUnfillableTestCase(unittest.TestCase):
         )
         self.assertIsNone(res["unfillable"])
 
+    def test_entry_day_sealed_board_is_unfillable(self):
+        # The analysis/entry day itself was a one-price sealed board (limit-up): the
+        # legacy keyword path assumes entry at start_price, but that fill was impossible.
+        bars = _bars(date(2024, 1, 1), [(102, 103, 101, 102), (102, 105, 103, 104), (104, 106, 104, 105)])
+        res = BacktestEngine.evaluate_single(
+            operation_advice="买入", analysis_date=date(2024, 1, 1), start_price=100.0,
+            start_high=100.0, start_low=100.0,
+            forward_bars=bars, stop_loss=None, take_profit=None, config=_V2,
+        )
+        self.assertTrue(res["unfillable"])
+
+    def test_entry_day_normal_not_unfillable(self):
+        bars = _bars(date(2024, 1, 1), [(102, 103, 101, 102), (102, 105, 103, 104), (104, 106, 104, 105)])
+        res = BacktestEngine.evaluate_single(
+            operation_advice="买入", analysis_date=date(2024, 1, 1), start_price=100.0,
+            start_high=101.0, start_low=99.0,
+            forward_bars=bars, stop_loss=None, take_profit=None, config=_V2,
+        )
+        self.assertFalse(res["unfillable"])
+
+    def test_v1_entry_day_sealed_unfillable_is_none(self):
+        bars = _bars(date(2024, 1, 1), [(102, 103, 101, 102), (102, 105, 103, 104), (104, 106, 104, 105)])
+        res = BacktestEngine.evaluate_single(
+            operation_advice="买入", analysis_date=date(2024, 1, 1), start_price=100.0,
+            start_high=100.0, start_low=100.0,
+            forward_bars=bars, stop_loss=None, take_profit=None, config=_V1,
+        )
+        self.assertIsNone(res["unfillable"])
+
+    def test_cash_position_entry_day_sealed_not_unfillable(self):
+        # No long position taken -> nothing to fill, so a sealed entry day is irrelevant.
+        bars = _bars(date(2024, 1, 1), [(102, 103, 101, 102), (102, 105, 103, 104), (104, 106, 104, 105)])
+        res = BacktestEngine.evaluate_single(
+            operation_advice="卖出", analysis_date=date(2024, 1, 1), start_price=100.0,
+            start_high=100.0, start_low=100.0,
+            forward_bars=bars, stop_loss=None, take_profit=None, config=_V2,
+        )
+        self.assertFalse(res["unfillable"])
+
 
 class UnfillableColumnMigrationTestCase(unittest.TestCase):
     def tearDown(self):

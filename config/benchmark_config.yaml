@@ -1,0 +1,13 @@
+# 回测基准指数映射（workflow D.1c）
+#
+# 仅 v2 引擎（BACKTEST_ENGINE_VERSION=v2）计算基准超额；按个股市场映射到基准指数，
+# 复用日线数据层在同一前向窗口计算指数收益，得到 excess_return_pct = 策略模拟收益 - 基准收益。
+# 指数日线不可得时 benchmark_return_pct/excess_return_pct 记 NULL 并告警，不阻断回测。
+#
+# 删除/清空本文件 = 使用内置默认映射（A 股 -> 沪深300）。
+
+version: 1
+benchmarks:
+  cn: "000300"   # 沪深300
+  # hk: "HSI"    # 港股基准（需指数日线数据可得时启用）
+  # us: "SPX"    # 美股基准（需指数日线数据可得时启用）

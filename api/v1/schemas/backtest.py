@@ -64,6 +64,13 @@ class BacktestResultItem(BaseModel):
     simulated_exit_price: Optional[float] = None
     simulated_exit_reason: Optional[str] = None
     simulated_return_pct: Optional[float] = None
+    # Evaluation source (B.3) and v2 engine fields (D.1b cost, D.1c benchmark/fillability)
+    signal_based: Optional[bool] = None
+    cost_pct: Optional[float] = None
+    benchmark_code: Optional[str] = None
+    benchmark_return_pct: Optional[float] = None
+    excess_return_pct: Optional[float] = None
+    unfillable: Optional[bool] = None
 
 
 class BacktestResultsResponse(BaseModel):

@@ -516,6 +516,14 @@ class BacktestResult(Base):
     # v2 交易成本（占名义本金百分比；仅 v2 引擎对已成交多头往返计提，workflow D.1b）
     cost_pct = Column(Float)
 
+    # v2 基准超额（workflow D.1c）：基准指数代码、基准区间收益、策略相对基准的超额收益
+    benchmark_code = Column(String(16))
+    benchmark_return_pct = Column(Float)
+    excess_return_pct = Column(Float)
+
+    # v2 不可成交标记（workflow D.1c）：入场/出场落在涨跌停封板（一价无区间）日，NULL=未评估(v1)
+    unfillable = Column(Boolean)
+
     __table_args__ = (
         UniqueConstraint(
             'analysis_history_id',
@@ -1113,6 +1121,16 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 connection.exec_driver_sql(
                     f'ALTER TABLE "{table_name}" ADD COLUMN cost_pct FLOAT'
                 )
+            for column, declaration in (
+                ("benchmark_code", "VARCHAR(16)"),
+                ("benchmark_return_pct", "FLOAT"),
+                ("excess_return_pct", "FLOAT"),
+                ("unfillable", "BOOLEAN"),
+            ):
+                if column not in existing:
+                    connection.exec_driver_sql(
+                        f'ALTER TABLE "{table_name}" ADD COLUMN {column} {declaration}'
+                    )
 
     def _ensure_backtest_summary_risk_columns(self) -> None:
         """Additively add the D.1a risk/return metric columns to backtest_summaries.

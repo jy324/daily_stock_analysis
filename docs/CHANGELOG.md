@@ -52,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 决策信号生成接入数据质量策略约束：从分析快照评估策略后收敛信号字段（行情降级→精确入场降级为 none、核心块≥2 降级→置为仅观察 direction=neutral、置信度按最紧上限收敛），并把命中策略与影响记入 `quality_constraints`；评估失败保留未约束信号，不影响分析主流程。
 - [改进] 回测引擎优先消费结构化 `DecisionSignal`：方向/仓位直接取自信号、入场按真实成交模型（限价/区间/市价含跳空，未触发记为未入场零收益），与生命周期推进共用同一成交语义；无信号的旧记录回退关键词推断法，`backtest_results` 新增 `signal_based` 区分来源（追加列，旧库默认 0）。
 - [修复] 回测 v2 新字段（`signal_based`/`cost_pct`/`benchmark_code`/`benchmark_return_pct`/`excess_return_pct`/`unfillable`）补声明到 `BacktestResultItem` 并同步 Web 类型，此前因 Pydantic 丢弃未声明 extra 未真正从 API 暴露；同时让关键词回退路径在入场日封板（一价无区间）时也标记 `unfillable`，v1 仍为 NULL。
+- [修复] 锁定 `fastapi<0.137.0`：FastAPI 0.137.0 在导入期拒绝 `api/v1/endpoints/history.py` 中无前缀路由器上的空路径声明（`Prefix and path cannot be both empty`），导致后端测试收集整体失败；待迁移这些空路径路由后再放宽上限。
 
 ## [3.21.0] - 2026-06-07
 

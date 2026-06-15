@@ -1329,8 +1329,12 @@ python main.py --debug
 | `BACKTEST_ENABLED` | `true` | 是否在每日分析后自动运行回测 |
 | `BACKTEST_EVAL_WINDOW_DAYS` | `10` | 评估窗口（交易日数） |
 | `BACKTEST_MIN_AGE_DAYS` | `14` | 仅回测 N 天前的记录，避免数据不完整 |
-| `BACKTEST_ENGINE_VERSION` | `v1` | 引擎版本号，升级逻辑时用于区分结果 |
+| `BACKTEST_ENGINE_VERSION` | `v1` | 引擎版本号，升级逻辑时用于区分结果；`v2` 启用交易成本、基准超额和不可成交标记 |
 | `BACKTEST_NEUTRAL_BAND_PCT` | `2.0` | 中性区间阈值（%），±2% 内视为震荡 |
+| `BACKTEST_COMMISSION_RATE` | `0.00025` | v2 单边佣金率 |
+| `BACKTEST_STAMP_TAX_RATE` | `0.0005` | v2 卖出单边印花税率 |
+| `BACKTEST_SLIPPAGE_BP` | `0.0` | v2 单边滑点，单位为基点 |
+| `BACKTEST_BENCHMARK_FILE` | `config/benchmark_config.yaml` | v2 市场到基准指数的 YAML 映射文件；缺失或解析失败时使用内置默认 A 股→沪深300 |
 
 ### 自动运行
 
@@ -1346,6 +1350,10 @@ python main.py --debug
 | `avg_simulated_return_pct` | 平均模拟执行收益率（含止盈止损退出） |
 | `stop_loss_trigger_rate` | 止损触发率（仅统计配置了止损的记录） |
 | `take_profit_trigger_rate` | 止盈触发率（仅统计配置了止盈的记录） |
+| `cost_pct` | v2 单笔回测计提的往返交易成本百分比 |
+| `benchmark_return_pct` | v2 同窗口基准指数收益率 |
+| `excess_return_pct` | v2 模拟收益相对基准收益的超额收益 |
+| `unfillable` | v2 入场或出场落在一价封板日时的不可成交提示 |
 
 ---
 

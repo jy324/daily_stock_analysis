@@ -1160,8 +1160,12 @@ Set the following variables in `.env` (all optional, have defaults):
 | `BACKTEST_ENABLED` | `true` | Whether to auto-run backtest after daily analysis |
 | `BACKTEST_EVAL_WINDOW_DAYS` | `10` | Evaluation window (trading days) |
 | `BACKTEST_MIN_AGE_DAYS` | `14` | Only backtest records older than N days to avoid incomplete data |
-| `BACKTEST_ENGINE_VERSION` | `v1` | Engine version, used to distinguish results when logic is updated |
+| `BACKTEST_ENGINE_VERSION` | `v1` | Engine version used to distinguish results; `v2` enables trading costs, benchmark excess, and unfillable flags |
 | `BACKTEST_NEUTRAL_BAND_PCT` | `2.0` | Neutral band threshold (%), ±2% treated as range-bound |
+| `BACKTEST_COMMISSION_RATE` | `0.00025` | v2 one-way commission rate |
+| `BACKTEST_STAMP_TAX_RATE` | `0.0005` | v2 sell-side stamp tax rate |
+| `BACKTEST_SLIPPAGE_BP` | `0.0` | v2 one-way slippage in basis points |
+| `BACKTEST_BENCHMARK_FILE` | `config/benchmark_config.yaml` | v2 YAML mapping from market to benchmark index; missing or invalid files fall back to built-in A-share→CSI 300 |
 
 ### Auto-run
 
@@ -1177,6 +1181,10 @@ Backtesting triggers automatically after the daily analysis flow completes (non-
 | `avg_simulated_return_pct` | Average simulated execution return (including SL/TP exits) |
 | `stop_loss_trigger_rate` | Stop-loss trigger rate (only counts records with SL configured) |
 | `take_profit_trigger_rate` | Take-profit trigger rate (only counts records with TP configured) |
+| `cost_pct` | v2 round-trip trading cost percentage for one backtest result |
+| `benchmark_return_pct` | v2 benchmark index return over the same forward window |
+| `excess_return_pct` | v2 simulated return minus benchmark return |
+| `unfillable` | v2 flag indicating an entry or exit landed on a one-price sealed board |
 
 ---
 

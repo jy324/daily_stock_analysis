@@ -422,6 +422,31 @@ class CircuitBreaker:
         """获取所有数据源状态"""
         with self._lock:
             return {source: info['state'] for source, info in self._states.items()}
+
+    def describe(self) -> Dict[str, Dict[str, Any]]:
+        """只读快照：返回每个数据源的熔断状态明细，不触发任何状态转移。
+
+        与 ``is_available`` 不同，本方法**无副作用**（不会把到期的 OPEN 推进到
+        HALF_OPEN），适合用于健康观测面板。``cooldown_remaining_seconds`` 仅在
+        OPEN 状态下给出剩余冷却秒数（已到期则为 0）。
+        """
+        now = time.time()
+        result: Dict[str, Dict[str, Any]] = {}
+        with self._lock:
+            for source, info in self._states.items():
+                last_failure = float(info.get('last_failure_time', 0.0) or 0.0)
+                seconds_since = int(now - last_failure) if last_failure else None
+                cooldown_remaining = None
+                if info['state'] == self.OPEN and last_failure:
+                    remaining = self.cooldown_seconds - (now - last_failure)
+                    cooldown_remaining = int(remaining) if remaining > 0 else 0
+                result[source] = {
+                    'state': info['state'],
+                    'failures': int(info.get('failures', 0)),
+                    'seconds_since_failure': seconds_since,
+                    'cooldown_remaining_seconds': cooldown_remaining,
+                }
+        return result
     
     def reset(self, source: Optional[str] = None) -> None:
         """重置熔断器状态"""

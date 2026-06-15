@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] 回测 v2 新字段（`signal_based`/`cost_pct`/`benchmark_code`/`benchmark_return_pct`/`excess_return_pct`/`unfillable`）补声明到 `BacktestResultItem` 并同步 Web 类型，此前因 Pydantic 丢弃未声明 extra 未真正从 API 暴露；同时让关键词回退路径在入场日封板（一价无区间）时也标记 `unfillable`，v1 仍为 NULL。
 - [修复] 锁定 `fastapi<0.137.0`：FastAPI 0.137.0 在导入期拒绝 `api/v1/endpoints/history.py` 中无前缀路由器上的空路径声明（`Prefix and path cannot be both empty`），导致后端测试收集整体失败；待迁移这些空路径路由后再放宽上限。
 - [新功能] 新增数据源健康聚合 API `GET /api/v1/providers/health`：聚合最近窗口内已持久化的 provider 调用诊断（成功率/降级/陈旧/平均延迟/最近错误）与实时熔断器只读状态（closed/open/half_open + 剩余冷却），作为数据源可观测面板入口；复用现有 `run_diagnostics` 与熔断器，无新增存储，只读不改变分析主流程。
+- [新功能] 新增结构化决策信号查询/管理 API：`GET /api/v1/signals`（按 code/market/action/state/source 过滤分页、`active_only`）、`GET /api/v1/signals/latest`（个股最新活跃信号）、`GET /api/v1/signals/{id}`、`PATCH /api/v1/signals/{id}/state`（人工状态流转，复用前向状态机，非法转移返回 409、目标不存在 404）；复用既有 `DecisionSignal` 数据模型与状态机，不新增表。
 
 ## [3.21.0] - 2026-06-07
 

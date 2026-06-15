@@ -4,9 +4,9 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
+from typing import List, Optional, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.schemas.decision_signal import DecisionSignal
 from src.storage import DatabaseManager, DecisionSignalRecord
@@ -113,6 +113,95 @@ class DecisionSignalRepository:
         except Exception:
             session.rollback()
             raise
+        finally:
+            session.close()
+
+    def _apply_filters(self, stmt, *, code, market, action, state, source, active_only):
+        if code:
+            stmt = stmt.where(DecisionSignalRecord.code == code)
+        if market:
+            stmt = stmt.where(DecisionSignalRecord.market == market)
+        if action:
+            stmt = stmt.where(DecisionSignalRecord.action == action)
+        if state:
+            stmt = stmt.where(DecisionSignalRecord.state == state)
+        if source:
+            stmt = stmt.where(DecisionSignalRecord.source == source)
+        if active_only:
+            stmt = stmt.where(DecisionSignalRecord.state.notin_(self._TERMINAL_STATES))
+        return stmt
+
+    def list_signals(
+        self,
+        *,
+        code: Optional[str] = None,
+        market: Optional[str] = None,
+        action: Optional[str] = None,
+        state: Optional[str] = None,
+        source: Optional[str] = None,
+        active_only: bool = False,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Tuple[List[DecisionSignalRecord], int]:
+        """Return ``(rows, total)`` for the given filters, newest first.
+
+        ``total`` is the unpaginated match count so callers can paginate. Rows are
+        ordered by ``generated_at`` then ``id`` descending (most recent first).
+        """
+        session = self.db.get_session()
+        try:
+            base = self._apply_filters(
+                select(DecisionSignalRecord),
+                code=code, market=market, action=action,
+                state=state, source=source, active_only=active_only,
+            )
+            total = session.execute(
+                self._apply_filters(
+                    select(func.count(DecisionSignalRecord.id)),
+                    code=code, market=market, action=action,
+                    state=state, source=source, active_only=active_only,
+                )
+            ).scalar_one()
+            rows = session.execute(
+                base.order_by(
+                    DecisionSignalRecord.generated_at.desc(),
+                    DecisionSignalRecord.id.desc(),
+                ).limit(limit).offset(offset)
+            ).scalars().all()
+            for row in rows:
+                session.expunge(row)
+            return list(rows), int(total)
+        finally:
+            session.close()
+
+    def get_by_id(self, signal_id: int) -> Optional[DecisionSignalRecord]:
+        """Return a single signal row by primary key, or ``None``."""
+        session = self.db.get_session()
+        try:
+            row = session.get(DecisionSignalRecord, signal_id)
+            if row is not None:
+                session.expunge(row)
+            return row
+        finally:
+            session.close()
+
+    def get_latest_active_for_code(self, code: str) -> Optional[DecisionSignalRecord]:
+        """Return the most recent non-terminal signal for a stock, or ``None``."""
+        session = self.db.get_session()
+        try:
+            row = session.execute(
+                select(DecisionSignalRecord)
+                .where(DecisionSignalRecord.code == code)
+                .where(DecisionSignalRecord.state.notin_(self._TERMINAL_STATES))
+                .order_by(
+                    DecisionSignalRecord.generated_at.desc(),
+                    DecisionSignalRecord.id.desc(),
+                )
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is not None:
+                session.expunge(row)
+            return row
         finally:
             session.close()
 

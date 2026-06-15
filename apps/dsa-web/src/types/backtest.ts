@@ -64,6 +64,13 @@ export interface BacktestResultItem {
   simulatedExitPrice?: number;
   simulatedExitReason?: string;
   simulatedReturnPct?: number;
+  // Evaluation source (B.3) and v2 engine fields (D.1b cost, D.1c benchmark/fillability)
+  signalBased?: boolean;
+  costPct?: number;
+  benchmarkCode?: string;
+  benchmarkReturnPct?: number;
+  excessReturnPct?: number;
+  unfillable?: boolean;
 }
 
 export interface BacktestResultsResponse {

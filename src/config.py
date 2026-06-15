@@ -900,7 +900,8 @@ class Config:
     backtest_commission_rate: float = 0.00025  # 单边佣金率
     backtest_stamp_tax_rate: float = 0.0005  # 印花税（仅卖出单边）
     backtest_slippage_bp: float = 0.0  # 单边滑点（基点）
-    
+    backtest_benchmark_file: str = "config/benchmark_config.yaml"  # 市场->基准指数映射（workflow D.1c）
+
     # === 日志配置 ===
     log_dir: str = "./logs"  # 日志文件目录
     log_level: str = "INFO"  # 日志级别
@@ -1717,6 +1718,7 @@ class Config:
                 os.getenv('BACKTEST_SLIPPAGE_BP'), 0.0,
                 field_name='BACKTEST_SLIPPAGE_BP', minimum=0.0,
             ),
+            backtest_benchmark_file=os.getenv('BACKTEST_BENCHMARK_FILE', 'config/benchmark_config.yaml').strip() or 'config/benchmark_config.yaml',
             log_dir=os.getenv('LOG_DIR', './logs'),
             log_level=os.getenv('LOG_LEVEL', 'INFO'),
             max_workers=parse_env_int(os.getenv('MAX_WORKERS'), 3, field_name='MAX_WORKERS', minimum=1),

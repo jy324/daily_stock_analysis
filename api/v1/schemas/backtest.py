@@ -107,6 +107,14 @@ class PerformanceMetrics(BaseModel):
     ambiguous_rate: Optional[float] = None
     avg_days_to_first_hit: Optional[float] = None
 
+    # v2 tradability metrics (aggregated from per-result benchmark/excess/unfillable/cost)
+    benchmark_coverage_pct: Optional[float] = None
+    avg_excess_return_pct: Optional[float] = None
+    alpha_hit_rate_pct: Optional[float] = None
+    avg_cost_pct: Optional[float] = None
+    unfillable_rate_pct: Optional[float] = None
+    tradable_win_rate_pct: Optional[float] = None
+
     advice_breakdown: Dict[str, Any] = Field(default_factory=dict)
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
 

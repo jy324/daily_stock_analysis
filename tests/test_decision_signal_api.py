@@ -92,6 +92,21 @@ class RepositoryFilterTestCase(_SignalApiBase):
         self.assertIsNotNone(row)
         self.assertEqual(row.id, latest.id)
 
+    def test_code_filters_match_equivalent_stock_code_variants(self):
+        from src.repositories.decision_signal_repo import DecisionSignalRepository
+
+        row = self._save(code="600519")
+        hk = self._save(code="HK00700")
+        repo = DecisionSignalRepository(self.db)
+
+        rows, total = repo.list_signals(code="SH600519")
+        self.assertEqual(total, 1)
+        self.assertEqual(rows[0].id, row.id)
+
+        latest = repo.get_latest_active_for_code("700.HK")
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest.id, hk.id)
+
 
 class ServiceStateUpdateTestCase(_SignalApiBase):
     def test_valid_transition_appends_history(self):
@@ -132,6 +147,45 @@ class ServiceStateUpdateTestCase(_SignalApiBase):
         with self.assertRaises(SignalNotFound):
             service.update_state(99999, new_state="entered")
 
+    def test_stale_state_update_raises_conflict(self):
+        from src.repositories.decision_signal_repo import DecisionSignalRepository
+        from src.services.decision_signal_query_service import (
+            DecisionSignalQueryService,
+            InvalidSignalTransition,
+        )
+
+        stale_row = self._save(state="generated")
+        repo = DecisionSignalRepository(self.db)
+        updated = repo.update_lifecycle(
+            stale_row.id,
+            state="waiting_entry",
+            expected_state="generated",
+            history_entry={"from": "generated", "to": "waiting_entry"},
+        )
+        self.assertTrue(updated)
+
+        service = DecisionSignalQueryService(self.db)
+        service.repo.get_by_id = lambda _signal_id: stale_row
+        with self.assertRaises(InvalidSignalTransition):
+            service.update_state(stale_row.id, new_state="entered")
+
+    def test_repository_expected_state_guard_does_not_overwrite(self):
+        from src.repositories.decision_signal_repo import DecisionSignalRepository
+
+        row = self._save(state="waiting_entry")
+        repo = DecisionSignalRepository(self.db)
+
+        updated = repo.update_lifecycle(
+            row.id,
+            state="entered",
+            expected_state="generated",
+            history_entry={"from": "generated", "to": "entered"},
+        )
+        self.assertFalse(updated)
+        current = repo.get_by_id(row.id)
+        self.assertEqual(current.state, "waiting_entry")
+        self.assertEqual(current.state_history, [])
+
 
 class ApiEndpointTestCase(_SignalApiBase):
     def _client(self):
@@ -155,6 +209,10 @@ class ApiEndpointTestCase(_SignalApiBase):
         self.assertEqual(resp.json()["id"], row.id)
 
         resp = client.get("/api/v1/signals/latest?code=600519")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["id"], row.id)
+
+        resp = client.get("/api/v1/signals/latest?code=600519.SH")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["id"], row.id)
 

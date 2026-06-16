@@ -14,7 +14,7 @@
 
 | 参数 | 说明 |
 | --- | --- |
-| `code` | 股票代码 |
+| `code` | 股票代码；按项目统一股票代码候选规则匹配，支持如 `600519`/`SH600519`/`600519.SH`、`HK00700`/`00700.HK`/`700.HK` 等等价形式 |
 | `market` | 市场 |
 | `action` | 八态动作（buy/add/hold/sell/reduce/watch/avoid/alert） |
 | `state` | 生命周期状态；**持仓中 = `entered`** |
@@ -26,7 +26,7 @@
 响应：`{ total, limit, offset, items: [DecisionSignalItem] }`，`total` 为未分页匹配总数。
 
 ### `GET /api/v1/signals/latest?code={code}`
-返回某只股票最近一条**未终结**信号（当前可执行信号）；无则 404。
+返回某只股票最近一条**未终结**信号（当前可执行信号）；`code` 使用与列表接口相同的等价代码匹配；无则 404。
 
 ### `GET /api/v1/signals/{signal_id}`
 按主键返回单条信号；不存在 404。
@@ -45,7 +45,7 @@ entered       -> target_hit | stop_hit | expired | invalidated
 ```
 
 - 目标信号不存在：`404`
-- 非法状态流转：`409`
+- 非法状态流转或状态已被其他请求/日终推进改变：`409`
 - 成功：返回更新后的 `DecisionSignalItem`；状态流转写入 `state_history`（`source=manual`，
   含 `from`/`to`/`at`/`note`）。转入 `entered` 自动补 `entered_date`，转入终态自动补 `closed_date`
   （仅在原值为空时）。

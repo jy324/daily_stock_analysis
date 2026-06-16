@@ -143,13 +143,21 @@ class DecisionSignalQueryService:
         entered_date = today if (new_state == "entered" and row.entered_date is None) else None
         closed_date = today if (is_terminal_state(new_state) and row.closed_date is None) else None
 
-        self.repo.update_lifecycle(
+        updated = self.repo.update_lifecycle(
             signal_id,
             state=new_state,
+            expected_state=row.state,
             entered_date=entered_date,
             closed_date=closed_date,
             history_entry=history_entry,
         )
+        if not updated:
+            latest = self.repo.get_by_id(signal_id)
+            if latest is None:
+                raise SignalNotFound(f"signal {signal_id} not found")
+            raise InvalidSignalTransition(
+                f"signal state changed before update: expected {row.state}, found {latest.state}"
+            )
         return self.get_signal(signal_id)
 
     @staticmethod

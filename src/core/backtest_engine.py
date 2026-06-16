@@ -746,8 +746,9 @@ class BacktestEngine:
         )
 
         long_completed = [r for r in completed if (r.position_recommendation or "") == "long"]
+        executed_longs = [r for r in long_completed if _v2(r, "simulated_entry_price") is not None]
         cost_values = [
-            float(_v2(r, "cost_pct")) for r in long_completed if _v2(r, "cost_pct") is not None
+            float(_v2(r, "cost_pct")) for r in executed_longs if _v2(r, "cost_pct") is not None
         ]
         avg_cost_pct = round(sum(cost_values) / len(cost_values), 4) if cost_values else None
 

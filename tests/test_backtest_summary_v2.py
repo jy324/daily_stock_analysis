@@ -28,6 +28,7 @@ class V2Row:
     first_hit_trading_days: Optional[int] = None
     operation_advice: Optional[str] = "买入"
     analysis_date: Optional[date] = None
+    simulated_entry_price: Optional[float] = 10.0
     # v2 fields
     benchmark_return_pct: Optional[float] = None
     excess_return_pct: Optional[float] = None
@@ -46,7 +47,7 @@ class ComputeSummaryV2MetricsTestCase(unittest.TestCase):
                   excess_return_pct=None, unfillable=False, cost_pct=0.3, analysis_date=date(2024, 1, 3)),
             V2Row(position_recommendation="cash", outcome="neutral", simulated_return_pct=0.0,
                   benchmark_return_pct=1.0, excess_return_pct=-1.0, unfillable=None, cost_pct=None,
-                  analysis_date=date(2024, 1, 4)),
+                  analysis_date=date(2024, 1, 4), simulated_entry_price=None),
         ]
         self.summary = BacktestEngine.compute_summary(
             results=self.rows, scope="overall", code=None, eval_window_days=10, engine_version="v2"
@@ -64,6 +65,16 @@ class ComputeSummaryV2MetricsTestCase(unittest.TestCase):
     def test_avg_cost(self):
         # three long trades each 0.3%.
         self.assertEqual(self.summary["avg_cost_pct"], 0.3)
+
+    def test_avg_cost_excludes_not_entered_signal_longs(self):
+        rows = [
+            V2Row(outcome="win", simulated_return_pct=5.0, cost_pct=0.4, simulated_entry_price=10.0),
+            V2Row(outcome="neutral", simulated_return_pct=0.0, cost_pct=0.0, simulated_entry_price=None),
+        ]
+        summary = BacktestEngine.compute_summary(
+            results=rows, scope="overall", code=None, eval_window_days=10, engine_version="v2"
+        )
+        self.assertEqual(summary["avg_cost_pct"], 0.4)
 
     def test_unfillable_rate(self):
         # one of three evaluated long trades is unfillable.
@@ -133,6 +144,77 @@ class BacktestSummaryV2ColumnMigrationTestCase(unittest.TestCase):
                     self.assertIn(col, cols, col)
             finally:
                 conn.close()
+
+
+class BacktestSummaryUpsertTestCase(unittest.TestCase):
+    def tearDown(self):
+        from src.storage import DatabaseManager
+
+        DatabaseManager.reset_instance()
+
+    def test_upsert_existing_summary_updates_all_mapped_metric_columns(self):
+        import tempfile
+
+        from src.core.backtest_engine import OVERALL_SENTINEL_CODE
+        from src.repositories.backtest_repo import BacktestRepository
+        from src.storage import BacktestSummary, DatabaseManager
+
+        DatabaseManager.reset_instance()
+        with tempfile.TemporaryDirectory() as tmp:
+            db = DatabaseManager(db_url=f"sqlite:///{tmp}/summary_upsert.db")
+            repo = BacktestRepository(db)
+            key = dict(
+                scope="overall",
+                code=OVERALL_SENTINEL_CODE,
+                eval_window_days=10,
+                engine_version="v2",
+            )
+
+            repo.upsert_summary(
+                BacktestSummary(
+                    **key,
+                    completed_count=1,
+                    max_drawdown_pct=-1.0,
+                    sharpe=0.1,
+                    holding_period_stats_json='{"avg": 1}',
+                    benchmark_coverage_pct=10.0,
+                    avg_excess_return_pct=1.0,
+                    alpha_hit_rate_pct=20.0,
+                    avg_cost_pct=0.1,
+                    unfillable_rate_pct=30.0,
+                    tradable_win_rate_pct=40.0,
+                    diagnostics_json='{"old": true}',
+                )
+            )
+            repo.upsert_summary(
+                BacktestSummary(
+                    **key,
+                    completed_count=2,
+                    max_drawdown_pct=-2.0,
+                    sharpe=0.2,
+                    holding_period_stats_json='{"avg": 2}',
+                    benchmark_coverage_pct=50.0,
+                    avg_excess_return_pct=2.0,
+                    alpha_hit_rate_pct=60.0,
+                    avg_cost_pct=0.2,
+                    unfillable_rate_pct=70.0,
+                    tradable_win_rate_pct=80.0,
+                    diagnostics_json='{"new": true}',
+                )
+            )
+
+            row = repo.get_summary(**key)
+            self.assertEqual(row.completed_count, 2)
+            self.assertEqual(row.max_drawdown_pct, -2.0)
+            self.assertEqual(row.sharpe, 0.2)
+            self.assertEqual(row.holding_period_stats_json, '{"avg": 2}')
+            self.assertEqual(row.benchmark_coverage_pct, 50.0)
+            self.assertEqual(row.avg_excess_return_pct, 2.0)
+            self.assertEqual(row.alpha_hit_rate_pct, 60.0)
+            self.assertEqual(row.avg_cost_pct, 0.2)
+            self.assertEqual(row.unfillable_rate_pct, 70.0)
+            self.assertEqual(row.tradable_win_rate_pct, 80.0)
+            self.assertEqual(row.diagnostics_json, '{"new": true}')
 
 
 if __name__ == "__main__":

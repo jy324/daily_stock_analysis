@@ -337,28 +337,11 @@ class BacktestRepository:
             ).scalar_one_or_none()
 
             if existing:
-                for attr in (
-                    "computed_at",
-                    "total_evaluations",
-                    "completed_count",
-                    "insufficient_count",
-                    "long_count",
-                    "cash_count",
-                    "win_count",
-                    "loss_count",
-                    "neutral_count",
-                    "direction_accuracy_pct",
-                    "win_rate_pct",
-                    "neutral_rate_pct",
-                    "avg_stock_return_pct",
-                    "avg_simulated_return_pct",
-                    "stop_loss_trigger_rate",
-                    "take_profit_trigger_rate",
-                    "ambiguous_rate",
-                    "avg_days_to_first_hit",
-                    "advice_breakdown_json",
-                    "diagnostics_json",
-                ):
+                identity_attrs = {"id", "scope", "code", "eval_window_days", "engine_version"}
+                for column in BacktestSummary.__table__.columns:
+                    attr = column.name
+                    if attr in identity_attrs:
+                        continue
                     setattr(existing, attr, getattr(summary, attr))
                 session.commit()
                 return

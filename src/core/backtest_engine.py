@@ -40,6 +40,11 @@ class BacktestResultLike(Protocol):
     first_hit: Optional[str]
     first_hit_trading_days: Optional[int]
     operation_advice: Optional[str]
+    # v2 fields (read defensively via getattr; legacy/v1 rows leave them None)
+    benchmark_return_pct: Optional[float]
+    excess_return_pct: Optional[float]
+    unfillable: Optional[bool]
+    cost_pct: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -668,6 +673,7 @@ class BacktestEngine:
         advice_breakdown = cls._compute_advice_breakdown(completed)
         diagnostics = cls._compute_diagnostics(results_list)
         risk_metrics = cls.compute_risk_metrics(completed)
+        v2_metrics = cls._compute_v2_tradability_metrics(completed)
 
         return {
             "scope": scope,
@@ -701,6 +707,78 @@ class BacktestEngine:
             "profit_factor": risk_metrics["profit_factor"],
             "payoff_ratio": risk_metrics["payoff_ratio"],
             "holding_period_stats": risk_metrics["holding_period_stats"],
+            "benchmark_coverage_pct": v2_metrics["benchmark_coverage_pct"],
+            "avg_excess_return_pct": v2_metrics["avg_excess_return_pct"],
+            "alpha_hit_rate_pct": v2_metrics["alpha_hit_rate_pct"],
+            "avg_cost_pct": v2_metrics["avg_cost_pct"],
+            "unfillable_rate_pct": v2_metrics["unfillable_rate_pct"],
+            "tradable_win_rate_pct": v2_metrics["tradable_win_rate_pct"],
+        }
+
+    @classmethod
+    def _compute_v2_tradability_metrics(cls, completed: List[BacktestResultLike]) -> Dict[str, Any]:
+        """Aggregate the v2 per-result fields (benchmark/excess/unfillable/cost).
+
+        All inputs are read defensively via ``getattr`` so v1 rows (which leave
+        these NULL) yield ``None`` for excess/alpha/cost/unfillable metrics and a
+        ``0.0`` benchmark coverage. ``tradable_win_rate_pct`` mirrors
+        ``win_rate_pct`` but drops trades flagged ``unfillable`` so the rate
+        reflects only realistically executable trades.
+        """
+        completed_count = len(completed)
+
+        def _v2(row: Any, name: str) -> Any:
+            return getattr(row, name, None)
+
+        benchmark_rows = [r for r in completed if _v2(r, "benchmark_return_pct") is not None]
+        benchmark_coverage_pct = (
+            round(len(benchmark_rows) / completed_count * 100, 2) if completed_count else None
+        )
+
+        excess_values = [
+            float(_v2(r, "excess_return_pct")) for r in completed if _v2(r, "excess_return_pct") is not None
+        ]
+        avg_excess_return_pct = round(sum(excess_values) / len(excess_values), 4) if excess_values else None
+        alpha_hit_rate_pct = (
+            round(sum(1 for v in excess_values if v > 0) / len(excess_values) * 100, 2)
+            if excess_values
+            else None
+        )
+
+        long_completed = [r for r in completed if (r.position_recommendation or "") == "long"]
+        executed_longs = [r for r in long_completed if _v2(r, "simulated_entry_price") is not None]
+        cost_values = [
+            float(_v2(r, "cost_pct")) for r in executed_longs if _v2(r, "cost_pct") is not None
+        ]
+        avg_cost_pct = round(sum(cost_values) / len(cost_values), 4) if cost_values else None
+
+        unfillable_evaluated = [r for r in long_completed if _v2(r, "unfillable") is not None]
+        unfillable_rate_pct = (
+            round(sum(1 for r in unfillable_evaluated if _v2(r, "unfillable") is True)
+                  / len(unfillable_evaluated) * 100, 2)
+            if unfillable_evaluated
+            else None
+        )
+
+        # Tradable win rate: win/loss outcomes excluding unfillable trades.
+        tradable_win = sum(
+            1 for r in completed if (r.outcome or "") == "win" and _v2(r, "unfillable") is not True
+        )
+        tradable_loss = sum(
+            1 for r in completed if (r.outcome or "") == "loss" and _v2(r, "unfillable") is not True
+        )
+        tradable_denominator = tradable_win + tradable_loss
+        tradable_win_rate_pct = (
+            round(tradable_win / tradable_denominator * 100, 2) if tradable_denominator else None
+        )
+
+        return {
+            "benchmark_coverage_pct": benchmark_coverage_pct,
+            "avg_excess_return_pct": avg_excess_return_pct,
+            "alpha_hit_rate_pct": alpha_hit_rate_pct,
+            "avg_cost_pct": avg_cost_pct,
+            "unfillable_rate_pct": unfillable_rate_pct,
+            "tradable_win_rate_pct": tradable_win_rate_pct,
         }
 
     @staticmethod

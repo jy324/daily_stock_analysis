@@ -585,6 +585,14 @@ class BacktestSummary(Base):
     payoff_ratio = Column(Float)
     holding_period_stats_json = Column(Text)
 
+    # v2 可交易性指标（基于 per-result benchmark/excess/unfillable/cost 聚合，v1 多为 NULL）
+    benchmark_coverage_pct = Column(Float)
+    avg_excess_return_pct = Column(Float)
+    alpha_hit_rate_pct = Column(Float)
+    avg_cost_pct = Column(Float)
+    unfillable_rate_pct = Column(Float)
+    tradable_win_rate_pct = Column(Float)
+
     # 诊断字段（JSON 字符串）
     advice_breakdown_json = Column(Text)
     diagnostics_json = Column(Text)
@@ -1049,6 +1057,7 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
             self._ensure_decision_signal_lifecycle_columns()
             self._ensure_backtest_signal_columns()
             self._ensure_backtest_summary_risk_columns()
+            self._ensure_backtest_summary_v2_columns()
             self._ensure_analysis_history_attribution_columns()
             self._ensure_schema_migration_record()
 
@@ -1156,6 +1165,35 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "profit_factor": "FLOAT",
                 "payoff_ratio": "FLOAT",
                 "holding_period_stats_json": "TEXT",
+            }
+            for column, declaration in additions.items():
+                if column not in existing:
+                    connection.exec_driver_sql(
+                        f'ALTER TABLE "{table_name}" ADD COLUMN {column} {declaration}'
+                    )
+
+    def _ensure_backtest_summary_v2_columns(self) -> None:
+        """Additively add the v2 tradability metric columns to backtest_summaries.
+
+        Fresh databases get these via ``create_all``; existing databases gain them
+        through ``ALTER TABLE ADD COLUMN`` (no-rewrite on SQLite). Legacy summary rows
+        read NULL until recomputed; v1 summaries keep most of these NULL by design.
+        """
+        if not self._is_sqlite_engine:
+            return
+
+        table_name = BacktestSummary.__tablename__
+        with self._engine.begin() as connection:
+            if not self._sqlite_table_exists(connection, table_name):
+                return
+            existing = self._sqlite_table_columns(connection, table_name)
+            additions = {
+                "benchmark_coverage_pct": "FLOAT",
+                "avg_excess_return_pct": "FLOAT",
+                "alpha_hit_rate_pct": "FLOAT",
+                "avg_cost_pct": "FLOAT",
+                "unfillable_rate_pct": "FLOAT",
+                "tradable_win_rate_pct": "FLOAT",
             }
             for column, declaration in additions.items():
                 if column not in existing:

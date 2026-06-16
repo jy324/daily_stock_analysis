@@ -109,6 +109,14 @@ export interface PerformanceMetrics {
   ambiguousRate?: number;
   avgDaysToFirstHit?: number;
 
+  // v2 tradability metrics (aggregated from per-result benchmark/excess/unfillable/cost)
+  benchmarkCoveragePct?: number;
+  avgExcessReturnPct?: number;
+  alphaHitRatePct?: number;
+  avgCostPct?: number;
+  unfillableRatePct?: number;
+  tradableWinRatePct?: number;
+
   adviceBreakdown: Record<string, unknown>;
   diagnostics: Record<string, unknown>;
 }

@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 回测引擎优先消费结构化 `DecisionSignal`：方向/仓位直接取自信号、入场按真实成交模型（限价/区间/市价含跳空，未触发记为未入场零收益），与生命周期推进共用同一成交语义；无信号的旧记录回退关键词推断法，`backtest_results` 新增 `signal_based` 区分来源（追加列，旧库默认 0）。
 - [修复] 回测 v2 新字段（`signal_based`/`cost_pct`/`benchmark_code`/`benchmark_return_pct`/`excess_return_pct`/`unfillable`）补声明到 `BacktestResultItem` 并同步 Web 类型，此前因 Pydantic 丢弃未声明 extra 未真正从 API 暴露；同时让关键词回退路径在入场日封板（一价无区间）时也标记 `unfillable`，v1 仍为 NULL。
 - [修复] 锁定 `fastapi<0.137.0`：FastAPI 0.137.0 在导入期拒绝 `api/v1/endpoints/history.py` 中无前缀路由器上的空路径声明（`Prefix and path cannot be both empty`），导致后端测试收集整体失败；待迁移这些空路径路由后再放宽上限。
+- [新功能] 新增数据源健康聚合 API `GET /api/v1/providers/health`：聚合最近窗口内已持久化的 provider 调用诊断（成功率/降级/陈旧/平均延迟/最近错误）与实时熔断器只读状态（closed/open/half_open + 剩余冷却），作为数据源可观测面板入口；复用现有 `run_diagnostics` 与熔断器，无新增存储，只读不改变分析主流程。
 
 ## [3.21.0] - 2026-06-07
 

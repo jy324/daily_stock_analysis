@@ -48,6 +48,7 @@
 | 自动化与推送 | GitHub Actions、Docker、本地定时任务、FastAPI 服务和企业微信/飞书/Telegram/Discord/Slack/邮件推送 |
 
 > 功能细节、字段契约、基本面 P0 超时语义、交易纪律、数据源优先级、Web/API 行为请看 [完整配置与部署指南](docs/full-guide.md)。
+> 本 fork 在上游基础上新增的能力（结构化决策信号、数据质量策略、回测评估 2.0、A 股情报、数据源健康观测）汇总见 [Fork 能力增强总览](docs/fork-enhancements.md)。
 
 ### 技术栈与数据来源
 

@@ -184,9 +184,10 @@ def advance_active_signals(
                 continue
 
             SignalStateMachine.assert_transition(record.state, advance.to_state)
-            repo.update_lifecycle(
+            updated = repo.update_lifecycle(
                 record.id,
                 state=advance.to_state,
+                expected_state=record.state,
                 entered_date=today if advance.entered_price is not None else None,
                 entered_price=advance.entered_price,
                 closed_date=today if advance.closed_price is not None else None,
@@ -198,6 +199,10 @@ def advance_active_signals(
                     "reason": advance.reason,
                 },
             )
+            if not updated:
+                raise InvalidSignalTransition(
+                    f"signal state changed before advancement: expected {record.state}"
+                )
             summary["transitioned"] += 1
         except Exception as exc:  # isolate per-signal failures
             summary["errors"] += 1

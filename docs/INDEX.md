@@ -39,6 +39,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
+| [Fork 能力增强总览](fork-enhancements.md) | 本 fork 在上游基础上新增能力的统一索引：A 股情报、结构化决策信号、数据质量策略、回测评估 2.0、运行流/数据源健康观测，含配置开关与功能-PR 对照 |
 | [Bot 命令与接入](bot-command.md) | Bot 命令、Webhook、平台接入和回调说明 |
 | [Bot 平台配置](bot/) | 飞书、钉钉、Discord 等 Bot 配置截图和补充说明 |
 | [实时告警中心](alerts.md) | EventMonitor 基线、Web 规则管理、通知结果、冷却状态和 Phase 边界 |

@@ -37,18 +37,17 @@ const AppContent: React.FC = () => {
 
   if (loadError) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-base px-4">
-        <div className="w-full max-w-lg">
-          <ApiErrorAlert error={loadError} />
+      <Shell>
+        <div className="flex min-h-[60vh] flex-col items-center justify-center px-4">
+          <div className="w-full max-w-lg">
+            <ApiErrorAlert
+              error={loadError}
+              actionLabel={t('common.retry')}
+              onAction={() => void refreshStatus()}
+            />
+          </div>
         </div>
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={() => void refreshStatus()}
-        >
-          {t('common.retry')}
-        </button>
-      </div>
+      </Shell>
     );
   }
 

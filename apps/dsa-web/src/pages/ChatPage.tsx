@@ -1279,8 +1279,15 @@ const ChatPage: React.FC = () => {
                 />
               ) : null}
             {skills.length > 0 && (
-              <div className="flex flex-wrap items-start gap-x-5 gap-y-2">
-                <span className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1">
+              <div
+                role="group"
+                aria-labelledby="chat-skill-group-label"
+                className="flex flex-wrap items-start gap-x-5 gap-y-2"
+              >
+                <span
+                  id="chat-skill-group-label"
+                  className="text-xs text-muted-text font-medium uppercase tracking-wider flex-shrink-0 mt-1"
+                >
                   策略
                 </span>
                 <label className="flex items-center gap-1.5 text-sm cursor-pointer group mt-0.5">

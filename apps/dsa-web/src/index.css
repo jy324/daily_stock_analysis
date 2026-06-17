@@ -1099,6 +1099,19 @@ textarea {
   font: inherit;
 }
 
+/* Global keyboard-focus baseline. Placed in @layer base so any component that
+   manages its own focus — whether via a utility-layer class (Button's
+   focus-visible:outline-none) or an unlayered rule (.chat-copy-btn) — overrides
+   it, avoiding double focus indicators. Every other interactive element still
+   gets a visible on-brand focus ring. Native inputs are intentionally excluded
+   (they have their own .input-focus-glow). */
+@layer base {
+  :where(a, button, [role="button"], [role="link"], [role="menuitem"], [role="menuitemradio"], [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+}
+
 .terminal-card {
   --terminal-card-border: var(--border-default);
   --terminal-card-border-hover: var(--border-hover);

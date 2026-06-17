@@ -6,6 +6,7 @@ import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
 import { ApiErrorAlert, Card, Badge, ConfirmDialog, EmptyState, InlineAlert } from '../components/common';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
+import { useChartPalette } from '../utils/chartPalette';
 import { formatUiText } from '../i18n/uiText';
 import { PORTFOLIO_TEXT } from '../locales/featureText';
 import type { FxRefreshFeedback } from '../utils/portfolioFormat';
@@ -44,7 +45,6 @@ import type {
   PortfolioTradeListItem,
 } from '../types/portfolio';
 
-const PIE_COLORS = ['#00d4ff', '#00ff88', '#ffaa00', '#ff7a45', '#7f8cff', '#ff4466'];
 const DEFAULT_PAGE_SIZE = 20;
 const FALLBACK_BROKERS: PortfolioImportBrokerItem[] = [
   { broker: 'huatai', aliases: [], displayName: '华泰' },
@@ -84,6 +84,7 @@ const PORTFOLIO_FILE_PICKER_CLASS =
 const PortfolioPage: React.FC = () => {
   const { language } = useUiLanguage();
   const text = PORTFOLIO_TEXT[language];
+  const pieColors = useChartPalette();
 
   // Set page title
   useEffect(() => {
@@ -1045,7 +1046,7 @@ const PortfolioPage: React.FC = () => {
                 <PieChart>
                   <Pie data={concentrationPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={90}>
                     {concentrationPieData.map((entry, index) => (
-                      <Cell key={`cell-${entry.name}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                      <Cell key={`cell-${entry.name}`} fill={pieColors[index % pieColors.length]} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(value) => `${Number(value).toFixed(2)}%`} />

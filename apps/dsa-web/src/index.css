@@ -73,15 +73,6 @@
   --warning: var(--color-warning);
   --danger: var(--color-danger);
 
-  /* Categorical chart palette (light). Distinct hues for non-semantic series
-     so a slice color never implies good/bad. Consumed via useChartPalette(). */
-  --chart-1: 193 100% 40%;
-  --chart-2: 152 60% 38%;
-  --chart-3: 37 92% 46%;
-  --chart-4: 247 70% 60%;
-  --chart-5: 350 80% 55%;
-  --chart-6: 217 83% 55%;
-
   /* Sentiment indicator colors (Fear & Greed Index) - Adjustable via CSS */
   --sentiment-greed: var(--color-cyan);
   --sentiment-neutral: var(--color-purple);
@@ -360,14 +351,6 @@
   --success: var(--color-success);
   --warning: var(--color-warning);
   --danger: var(--color-danger);
-
-  /* Categorical chart palette (dark): brighter for the deep background. */
-  --chart-1: 190 100% 50%;
-  --chart-2: 152 69% 45%;
-  --chart-3: 37 92% 55%;
-  --chart-4: 247 84% 70%;
-  --chart-5: 349 90% 63%;
-  --chart-6: 213 90% 62%;
 
   /* Sentiment indicator colors (Dark theme) - Adjustable via CSS */
   --sentiment-greed: var(--color-cyan);

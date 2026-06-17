@@ -30,7 +30,10 @@
   --popover: 0 0% 100%;
   --popover-foreground: 228 35% 12%;
   --primary: 193 100% 43%;
-  --primary-foreground: 216 33% 97%;
+  /* On-primary must be dark in light mode: near-white (216 33% 97%) on the
+     mid-cyan --primary fails WCAG (2.47:1). Use a near-black navy (~#04121c,
+     matching .btn-primary) for ~7:1 contrast on the cyan gradient. */
+  --primary-foreground: 205 71% 6%;
   --secondary: 214 32% 91%;
   --secondary-foreground: 228 35% 16%;
   --muted: 214 30% 94%;

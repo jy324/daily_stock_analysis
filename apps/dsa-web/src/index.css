@@ -777,6 +777,29 @@
   opacity: 0.65;
 }
 
+/* Native date/time picker indicator: the default glyph is near-invisible on
+   the dark theme. Give it a pointer affordance + hover, and invert it in dark
+   mode so it reads against the dark input surface. */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+input[type="month"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+.dark input[type="date"]::-webkit-calendar-picker-indicator,
+.dark input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+.dark input[type="month"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
+
 .input-focus-glow:focus,
 .input-focus-glow:focus-within {
   border-color: var(--input-surface-border-focus);

@@ -305,15 +305,48 @@ const HomePage: React.FC = () => {
     }
   }, [closeStrategyMenu, focusStrategyItem, strategyOptions.length]);
   const setupNeedsAction = setupStatus ? !setupStatus.isComplete : false;
-  const setupMissingLabels = useMemo(() => {
+  const setupMissingChecks = useMemo(() => {
     if (!setupStatus) {
-      return '';
+      return [];
     }
-    const requiredNeedsAction = setupStatus.checks
+    return setupStatus.checks
       .filter((check) => check.required && check.status === 'needs_action')
-      .map((check) => check.title);
-    return requiredNeedsAction.slice(0, 3).join(uiLanguage === 'en' ? ', ' : '、');
-  }, [setupStatus, uiLanguage]);
+      .slice(0, 3);
+  }, [setupStatus]);
+  const goConfigure = useCallback(
+    (section?: string) => {
+      navigate(section ? `/settings?section=${encodeURIComponent(section)}` : '/settings');
+    },
+    [navigate],
+  );
+  // Render the missing items as inline links that deep-link to their settings
+  // section. Split the localized template on its {labels} placeholder so the
+  // links land where the sentence expects them in either language.
+  const setupMissingMessage = useMemo<React.ReactNode>(() => {
+    if (setupMissingChecks.length === 0) {
+      return t('home.setupMissingGeneric');
+    }
+    const [prefix, suffix = ''] = t('home.setupMissingWithLabels').split('{labels}');
+    const separator = uiLanguage === 'en' ? ', ' : '、';
+    return (
+      <>
+        {prefix}
+        {setupMissingChecks.map((check, index) => (
+          <span key={check.key}>
+            <button
+              type="button"
+              onClick={() => goConfigure(check.category)}
+              className="font-medium underline underline-offset-2 transition-opacity hover:opacity-80"
+            >
+              {check.title}
+            </button>
+            {index < setupMissingChecks.length - 1 ? separator : ''}
+          </span>
+        ))}
+        {suffix}
+      </>
+    );
+  }, [setupMissingChecks, t, uiLanguage, goConfigure]);
 
   useDashboardLifecycle({
     loadInitialHistory,
@@ -783,17 +816,13 @@ const HomePage: React.FC = () => {
             <InlineAlert
               variant="warning"
               title={t('home.setupIncomplete')}
-              message={
-                setupMissingLabels
-                  ? t('home.setupMissingWithLabels', { labels: setupMissingLabels })
-                  : t('home.setupMissingGeneric')
-              }
+              message={setupMissingMessage}
               action={(
                 <Button
                   type="button"
                   variant="secondary"
                   size="sm"
-                  onClick={() => navigate('/settings')}
+                  onClick={() => goConfigure()}
                 >
                   {t('home.goSettings')}
                 </Button>

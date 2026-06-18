@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState, type ComponentProps } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { LLMChannelEditor } from '../LLMChannelEditor';
+import { LLMChannelEditor, type LLMChannelEditorHandle } from '../LLMChannelEditor';
 
 const {
   update,
@@ -21,6 +21,19 @@ vi.mock('../../../api/systemConfig', () => ({
   },
 }));
 
+// The editor's own save button was removed in favor of the page-level
+// "保存配置" driving its imperative save(). This harness re-exposes a save
+// trigger with the same accessible name so the save-flow assertions hold.
+function TestChannelEditor(props: ComponentProps<typeof LLMChannelEditor>) {
+  const ref = useRef<LLMChannelEditorHandle>(null);
+  return (
+    <>
+      <LLMChannelEditor ref={ref} {...props} />
+      <button type="button" onClick={() => { void ref.current?.save(); }}>保存 AI 配置</button>
+    </>
+  );
+}
+
 describe('LLMChannelEditor', () => {
   beforeEach(() => {
     update.mockReset();
@@ -30,7 +43,7 @@ describe('LLMChannelEditor', () => {
 
   it('renders API Key input with controlled visibility', async () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'openai' },
           { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' },
@@ -56,7 +69,7 @@ describe('LLMChannelEditor', () => {
 
   it('shows help dialogs for channel editor fields', async () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'deepseek' },
           { key: 'LLM_DEEPSEEK_PROTOCOL', value: 'deepseek' },
@@ -93,7 +106,7 @@ describe('LLMChannelEditor', () => {
 
   it('hides LiteLLM wording when advanced YAML routing is enabled', () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'openai' },
           { key: 'LITELLM_CONFIG', value: './litellm_config.yaml' },
@@ -117,7 +130,7 @@ describe('LLMChannelEditor', () => {
 
   it('keeps minimax-prefixed models in runtime selections', () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'openai' },
           { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' },
@@ -143,7 +156,7 @@ describe('LLMChannelEditor', () => {
 
   it('uses DeepSeek V4 defaults when adding the official preset', async () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[]}
         configVersion="v1"
         maskToken="******"
@@ -164,7 +177,7 @@ describe('LLMChannelEditor', () => {
     ['volcengine', /火山方舟/i, 'https://ark.cn-beijing.volces.com/api/v3', 'doubao-seed-1-6-251015,doubao-seed-1-6-thinking-251015'],
   ])('uses %s OpenAI-compatible defaults when adding the official preset', async (preset, buttonName, baseUrl, models) => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[]}
         configVersion="v1"
         maskToken="******"
@@ -185,7 +198,7 @@ describe('LLMChannelEditor', () => {
 
   it('shows provider capability badges, official sources, and config hints', async () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'openrouter' },
           { key: 'LLM_OPENROUTER_PROTOCOL', value: 'openai' },
@@ -216,7 +229,7 @@ describe('LLMChannelEditor', () => {
 
   it('shows model-discovery capability for SiliconFlow provider hints', async () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'siliconflow' },
           { key: 'LLM_SILICONFLOW_PROTOCOL', value: 'openai' },
@@ -239,7 +252,7 @@ describe('LLMChannelEditor', () => {
 
   it('does not show provider metadata for custom or unknown channels', async () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'my_proxy' },
           { key: 'LLM_MY_PROXY_PROTOCOL', value: 'openai' },
@@ -263,7 +276,7 @@ describe('LLMChannelEditor', () => {
 
   it('preserves manually edited base URL and models when switching preset names', async () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[]}
         configVersion="v1"
         maskToken="******"
@@ -292,7 +305,7 @@ describe('LLMChannelEditor', () => {
 
   it('uses the selected preset defaults when adding a duplicate provider channel', async () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[]}
         configVersion="v1"
         maskToken="******"
@@ -333,7 +346,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[]}
         configVersion="v1"
         maskToken="******"
@@ -373,7 +386,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'my_proxy', rawValueExists: false },
           { key: 'LITELLM_MODEL', value: 'openai/gpt-4o', rawValueExists: false },
@@ -420,7 +433,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'my_proxy' },
           { key: 'LLM_MY_PROXY_PROTOCOL', value: 'openai', rawValueExists: false },
@@ -458,7 +471,7 @@ describe('LLMChannelEditor', () => {
 
   it('uses runtime API_KEYS when both API_KEY and API_KEYS coexist', async () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'my_proxy', rawValueExists: false },
           { key: 'LLM_MY_PROXY_PROTOCOL', value: 'openai', rawValueExists: false },
@@ -490,7 +503,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'my_proxy', rawValueExists: false },
           { key: 'LLM_MY_PROXY_PROTOCOL', value: 'openai', rawValueExists: false },
@@ -539,7 +552,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'my_proxy', rawValueExists: false },
           { key: 'LLM_MY_PROXY_PROTOCOL', value: 'openai', rawValueExists: false },
@@ -585,7 +598,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'deepseek' },
           { key: 'LLM_DEEPSEEK_PROTOCOL', value: 'deepseek' },
@@ -617,7 +630,9 @@ describe('LLMChannelEditor', () => {
     const updatePayload = update.mock.calls[0][0];
     expect(updatePayload.items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ key: 'LITELLM_MODEL', value: '' }),
+        // Stale primary is dropped, then auto-filled with the first available
+        // enabled-channel model so the channel never saves with an empty model.
+        expect.objectContaining({ key: 'LITELLM_MODEL', value: 'deepseek/deepseek-v4-flash' }),
         expect.objectContaining({ key: 'AGENT_LITELLM_MODEL', value: '' }),
         expect.objectContaining({ key: 'LITELLM_FALLBACK_MODELS', value: 'deepseek/deepseek-v4-pro,cohere/command-r-plus' }),
         expect.objectContaining({ key: 'VISION_MODEL', value: '' }),
@@ -638,7 +653,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'deepseek' },
           { key: 'LLM_DEEPSEEK_PROTOCOL', value: 'deepseek' },
@@ -690,7 +705,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'primary' },
           { key: 'LLM_PRIMARY_PROTOCOL', value: 'openai' },
@@ -743,7 +758,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'deepseek' },
           { key: 'LLM_DEEPSEEK_PROTOCOL', value: 'deepseek' },
@@ -791,7 +806,7 @@ describe('LLMChannelEditor', () => {
       const [items, setItems] = useState(initialItems);
 
       return (
-        <LLMChannelEditor
+        <TestChannelEditor
           items={items}
           configVersion="v1"
           maskToken="******"
@@ -848,7 +863,7 @@ describe('LLMChannelEditor', () => {
     });
 
     const renderResult = render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={initialItems}
         configVersion="v1"
         maskToken="******"
@@ -866,7 +881,7 @@ describe('LLMChannelEditor', () => {
 
     const savedItems = update.mock.calls[0][0].items;
     renderResult.rerender(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={savedItems}
         configVersion="v2"
         maskToken="******"
@@ -891,7 +906,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'deepseek' },
           { key: 'LLM_DEEPSEEK_PROTOCOL', value: 'deepseek' },
@@ -932,7 +947,7 @@ describe('LLMChannelEditor', () => {
 
   it('keeps runtime selections while channel models are edited temporarily', async () => {
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'deepseek' },
           { key: 'LLM_DEEPSEEK_PROTOCOL', value: 'deepseek' },
@@ -991,7 +1006,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'deepseek' },
           { key: 'LLM_DEEPSEEK_PROTOCOL', value: 'deepseek' },
@@ -1042,7 +1057,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'dashscope' },
           { key: 'LLM_DASHSCOPE_PROTOCOL', value: 'openai' },
@@ -1080,7 +1095,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'dashscope' },
           { key: 'LLM_DASHSCOPE_PROTOCOL', value: 'openai' },
@@ -1123,7 +1138,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'dashscope' },
           { key: 'LLM_DASHSCOPE_PROTOCOL', value: 'openai' },
@@ -1176,7 +1191,7 @@ describe('LLMChannelEditor', () => {
     testLLMChannel.mockResolvedValue({ success: false, message: 'LLM authentication failed', error: '401 Unauthorized · Bearer [REDACTED]', errorCode: 'auth', stage: 'chat_completion', retryable: false, details: {}, resolvedProtocol: 'openai', resolvedModel: 'openai/gpt-4o-mini', latencyMs: null });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'secret-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
         configVersion="v1"
         maskToken="******"
@@ -1207,7 +1222,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'siliconflow' },
           { key: 'LLM_SILICONFLOW_PROTOCOL', value: 'openai' },
@@ -1252,7 +1267,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'proxy' },
           { key: 'LLM_PROXY_PROTOCOL', value: 'openai' },
@@ -1292,7 +1307,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'secret-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
         configVersion="v1"
         maskToken="******"
@@ -1322,7 +1337,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'secret-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
         configVersion="v1"
         maskToken="******"
@@ -1353,7 +1368,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'secret-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
         configVersion="v1"
         maskToken="******"
@@ -1401,7 +1416,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'secret-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
         configVersion="v1"
         maskToken="******"
@@ -1446,7 +1461,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'bad-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
         configVersion="v1"
         maskToken="******"
@@ -1479,7 +1494,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'gemini' },
           { key: 'LLM_GEMINI_PROTOCOL', value: 'gemini' },
@@ -1520,7 +1535,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'openai' },
           { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' },
@@ -1557,7 +1572,7 @@ describe('LLMChannelEditor', () => {
     });
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'openai' },
           { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' },
@@ -1598,7 +1613,7 @@ describe('LLMChannelEditor', () => {
       });
 
     const renderResult = render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'openai' },
           { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' },
@@ -1622,7 +1637,7 @@ describe('LLMChannelEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: '获取模型' }));
 
     renderResult.rerender(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'dashscope' },
           { key: 'LLM_DASHSCOPE_PROTOCOL', value: 'openai' },
@@ -1669,7 +1684,7 @@ describe('LLMChannelEditor', () => {
     discoverLLMChannelModels.mockImplementationOnce(() => pendingFirst);
 
     render(
-      <LLMChannelEditor
+      <TestChannelEditor
         items={[
           { key: 'LLM_CHANNELS', value: 'dashscope' },
           { key: 'LLM_DASHSCOPE_PROTOCOL', value: 'openai' },

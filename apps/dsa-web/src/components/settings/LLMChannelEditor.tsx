@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import type { ParsedApiError } from '../../api/error';
 import { getParsedApiError } from '../../api/error';
@@ -109,7 +109,14 @@ interface LLMChannelEditorProps {
   configVersion: string;
   maskToken: string;
   onSaved: (updatedItems: Array<{ key: string; value: string }>) => void | Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
   disabled?: boolean;
+}
+
+export interface LLMChannelEditorHandle {
+  /** Persist channel + runtime changes. Returns false on validation/save error. */
+  save: () => Promise<boolean>;
+  hasChanges: boolean;
 }
 
 interface ChannelRowProps {
@@ -1147,9 +1154,15 @@ function sanitizeRuntimeConfigForSave(
   availableModels: string[],
   itemMap: Map<string, string>,
 ): RuntimeConfig {
-  const primaryModel = runtimeConfig.primaryModel && !isRuntimeModelAvailable(runtimeConfig.primaryModel, availableModels, itemMap)
+  let primaryModel = runtimeConfig.primaryModel && !isRuntimeModelAvailable(runtimeConfig.primaryModel, availableModels, itemMap)
     ? ''
     : runtimeConfig.primaryModel;
+  // Auto-select a primary model when none is set but enabled channels expose
+  // models — otherwise the channel saves with LITELLM_MODEL='' and analysis
+  // later fails with "无可用大模型".
+  if (!primaryModel && availableModels.length > 0) {
+    primaryModel = availableModels[0];
+  }
   const agentPrimaryModel = runtimeConfig.agentPrimaryModel && !isRuntimeModelAvailable(runtimeConfig.agentPrimaryModel, availableModels, itemMap)
     ? ''
     : runtimeConfig.agentPrimaryModel;
@@ -1331,13 +1344,14 @@ function channelsAreEqual(left: ChannelConfig, right: ChannelConfig): boolean {
   );
 }
 
-export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
+export const LLMChannelEditor = forwardRef<LLMChannelEditorHandle, LLMChannelEditorProps>(({
   items,
   configVersion,
   maskToken,
   onSaved,
+  onDirtyChange,
   disabled = false,
-}) => {
+}, ref) => {
   const initialItemSourceByKey = useMemo(() => {
     const sourceByKey = new Map<string, boolean>();
     for (const item of items) {
@@ -1597,11 +1611,11 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
     setIsCollapsed(false);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (): Promise<boolean> => {
     const hasEmptyName = channels.some((channel) => !channel.name.trim());
     if (hasEmptyName) {
       setSaveMessage({ type: 'local-error', text: '渠道名称不能为空，且只能包含字母、数字或下划线。' });
-      return;
+      return false;
     }
 
     const runtimeConfigForSave = managesRuntimeConfig
@@ -1616,14 +1630,14 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
         && !isRuntimeModelAvailable(runtimeConfigForSave.primaryModel, availableModels, savedItemMap);
       if (invalidPrimaryModel) {
         setSaveMessage({ type: 'local-error', text: '当前主模型不在已启用渠道的模型列表中，请重新选择。' });
-        return;
+        return false;
       }
 
       const invalidAgentPrimaryModel = runtimeConfigForSave.agentPrimaryModel
         && !isRuntimeModelAvailable(runtimeConfigForSave.agentPrimaryModel, availableModels, savedItemMap);
       if (invalidAgentPrimaryModel) {
         setSaveMessage({ type: 'local-error', text: '当前 Agent 主模型不在已启用渠道的模型列表中，请重新选择。' });
-        return;
+        return false;
       }
 
       const invalidFallbackModel = runtimeConfigForSave.fallbackModels.some(
@@ -1631,14 +1645,14 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
       );
       if (invalidFallbackModel) {
         setSaveMessage({ type: 'local-error', text: '存在无效的备选模型，请重新选择。' });
-        return;
+        return false;
       }
 
       const invalidVisionModel = runtimeConfigForSave.visionModel
         && !isRuntimeModelAvailable(runtimeConfigForSave.visionModel, availableModels, savedItemMap);
       if (invalidVisionModel) {
         setSaveMessage({ type: 'local-error', text: '当前 Vision 模型不在已启用渠道的模型列表中，请重新选择。' });
-        return;
+        return false;
       }
     }
 
@@ -1678,13 +1692,24 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
       };
       setSaveWarnings(responseWarnings);
       setSaveMessage({ type: 'success', text: managesRuntimeConfig ? 'AI 配置已保存' : '渠道配置已保存' });
+      return true;
     } catch (error: unknown) {
       setSaveWarnings([]);
       setSaveMessage({ type: 'error', error: getParsedApiError(error) });
+      return false;
     } finally {
       setIsSaving(false);
     }
   };
+
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+  useImperativeHandle(ref, () => ({ save: () => handleSaveRef.current(), hasChanges }), [hasChanges]);
+
+  useEffect(() => {
+    onDirtyChange?.(hasChanges);
+    return () => onDirtyChange?.(false);
+  }, [hasChanges, onDirtyChange]);
 
   const handleTest = async (channel: ChannelConfig, index: number) => {
     setTestStates((previous) => ({
@@ -2115,18 +2140,13 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
             />
           )}
 
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              variant="settings-primary"
-              glow
-              disabled={busy || !hasChanges}
-              onClick={() => void handleSave()}
-            >
-              {isSaving ? '保存中...' : managesRuntimeConfig ? '保存 AI 配置' : '保存渠道配置'}
-            </Button>
-            {!hasChanges ? <span className="text-xs text-muted-text">当前没有未保存的改动</span> : null}
-          </div>
+          {hasChanges ? (
+            <InlineAlert
+              variant="info"
+              message="渠道有未保存的改动，点击右上角「保存配置」即可保存。"
+              className="rounded-lg px-3 py-2 text-sm shadow-none"
+            />
+          ) : null}
 
           {saveMessage?.type === 'success' ? (
             <InlineAlert
@@ -2164,4 +2184,6 @@ export const LLMChannelEditor: React.FC<LLMChannelEditorProps> = ({
       ) : null}
     </div>
   );
-};
+});
+
+LLMChannelEditor.displayName = 'LLMChannelEditor';

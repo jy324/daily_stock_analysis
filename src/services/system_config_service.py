@@ -2653,16 +2653,16 @@ class SystemConfigService:
             if primary_check["status"] == "configured":
                 return self._setup_check(
                     "llm_agent",
-                    "Agent 渠道",
-                    "agent",
+                    "Agent 主模型",
+                    "ai_model",
                     True,
                     "inherited",
                     "未单独配置 Agent 主模型，将继承 LLM 主渠道。",
                 )
             return self._setup_check(
                 "llm_agent",
-                "Agent 渠道",
-                "agent",
+                "Agent 主模型",
+                "ai_model",
                 True,
                 "needs_action",
                 "Agent 未配置独立模型，且 LLM 主渠道尚不可用。",
@@ -2677,8 +2677,8 @@ class SystemConfigService:
         if _uses_direct_env_provider(agent_model):
             return self._setup_check(
                 "llm_agent",
-                "Agent 渠道",
-                "agent",
+                "Agent 主模型",
+                "ai_model",
                 True,
                 "configured",
                 f"已配置 Agent 主模型: {agent_model}",
@@ -2689,8 +2689,8 @@ class SystemConfigService:
         ) or agent_model in configured_models:
             return self._setup_check(
                 "llm_agent",
-                "Agent 渠道",
-                "agent",
+                "Agent 主模型",
+                "ai_model",
                 True,
                 "configured",
                 f"已配置 Agent 主模型: {agent_model}",
@@ -2698,8 +2698,8 @@ class SystemConfigService:
 
         return self._setup_check(
             "llm_agent",
-            "Agent 渠道",
-            "agent",
+            "Agent 主模型",
+            "ai_model",
             True,
             "needs_action",
             f"Agent 主模型 {agent_model} 缺少可用渠道或匹配的 API Key。",

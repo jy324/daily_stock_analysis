@@ -13,6 +13,7 @@ import {
   ChangePasswordCard,
   IntelligentImport,
   LLMChannelEditor,
+  type LLMChannelEditorHandle,
   NotificationTestPanel,
   SettingsCategoryNav,
   SettingsAlert,
@@ -269,6 +270,9 @@ const SettingsPage: React.FC = () => {
   );
   const desktopAppVersion = getDesktopAppVersion();
   const shouldShowDesktopVersionCard = Boolean(desktopAppVersion);
+
+  const channelEditorRef = useRef<LLMChannelEditorHandle>(null);
+  const [channelDirty, setChannelDirty] = useState(false);
 
   const [alphaSiftCardHidden, setAlphaSiftCardHidden] = useState<boolean>(() => {
     if (typeof window === 'undefined') {
@@ -587,6 +591,18 @@ const SettingsPage: React.FC = () => {
   };
 
   const handleSaveConfig = async () => {
+    // Channel editor manages its own structured config; commit it first (it
+    // refreshes configVersion via onSaved) before the generic draft save.
+    if (channelDirty && channelEditorRef.current) {
+      const channelSaved = await channelEditorRef.current.save();
+      if (!channelSaved) {
+        return;
+      }
+      notifySystemConfigChanged();
+      if (!hasDirty) {
+        return;
+      }
+    }
     const changedItems = getChangedItems();
     const changedAlphaSiftItem = changedItems.find((item) => item.key === 'ALPHASIFT_ENABLED');
     const result = await save();
@@ -741,7 +757,7 @@ const SettingsPage: React.FC = () => {
               type="button"
               variant="settings-primary"
               onClick={() => void handleSaveConfig()}
-              disabled={!hasDirty || isSaving || isLoading}
+              disabled={(!hasDirty && !channelDirty) || isSaving || isLoading}
               isLoading={isSaving}
               loadingText={t('settings.saving')}
             >
@@ -1063,9 +1079,11 @@ const SettingsPage: React.FC = () => {
                 description={t('settings.llmAccessDescription')}
               >
                 <LLMChannelEditor
+                  ref={channelEditorRef}
                   items={rawActiveItems}
                   configVersion={configVersion}
                   maskToken={maskToken}
+                  onDirtyChange={setChannelDirty}
                   onSaved={async (updatedItems) => {
                     await refreshAfterExternalSave(updatedItems.map((item) => item.key));
                   }}

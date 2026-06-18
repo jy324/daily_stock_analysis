@@ -820,7 +820,6 @@ const SettingsPage: React.FC = () => {
                     type="button"
                     onClick={hideAlphaSiftCard}
                     aria-label={t('settings.alphaSiftHideCard')}
-                    title={t('settings.alphaSiftHideCard')}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--settings-border)] bg-[var(--settings-surface)] text-muted-text transition-colors hover:bg-[var(--settings-surface-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15"
                   >
                     <X aria-hidden="true" className="h-4 w-4" />

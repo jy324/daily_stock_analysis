@@ -575,6 +575,13 @@
 
 /* ============ Base Styles ============ */
 @layer base {
+  /* Reserve the scrollbar gutter on the page scroller so locking body scroll
+     (modals via SettingsHelpButton, drawers via Drawer) doesn't remove the
+     scrollbar and shift the whole page sideways by its width. */
+  html {
+    scrollbar-gutter: stable;
+  }
+
   body {
     margin: 0;
     min-width: 320px;

@@ -1,5 +1,6 @@
 import type React from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { X } from 'lucide-react';
 import { useAuth, useSystemConfig } from '../hooks';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from '../api/error';
@@ -209,6 +210,11 @@ function formatEnvBackupFilename(isDesktopRuntime: boolean) {
   return `${isDesktopRuntime ? 'dsa-desktop-env' : 'dsa-env'}_${date}_${time}.env`;
 }
 
+// Client-side UI preference: whether the AlphaSift promo/control card is
+// dismissed from the top of the settings page. Re-enabled from the Data Source
+// category (AlphaSift's config home).
+const ALPHASIFT_CARD_HIDDEN_KEY = 'dsa:settings:alphasiftCardHidden';
+
 const SettingsPage: React.FC = () => {
   const { authEnabled, passwordChangeable } = useAuth();
   const { language: uiLanguage, t } = useUiLanguage();
@@ -230,6 +236,33 @@ const SettingsPage: React.FC = () => {
   );
   const desktopAppVersion = getDesktopAppVersion();
   const shouldShowDesktopVersionCard = Boolean(desktopAppVersion);
+
+  const [alphaSiftCardHidden, setAlphaSiftCardHidden] = useState<boolean>(() => {
+    if (typeof window === 'undefined') {
+      return false;
+    }
+    try {
+      return window.localStorage.getItem(ALPHASIFT_CARD_HIDDEN_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const hideAlphaSiftCard = useCallback(() => {
+    setAlphaSiftCardHidden(true);
+    try {
+      window.localStorage.setItem(ALPHASIFT_CARD_HIDDEN_KEY, 'true');
+    } catch {
+      /* ignore storage failures */
+    }
+  }, []);
+  const showAlphaSiftCard = useCallback(() => {
+    setAlphaSiftCardHidden(false);
+    try {
+      window.localStorage.removeItem(ALPHASIFT_CARD_HIDDEN_KEY);
+    } catch {
+      /* ignore storage failures */
+    }
+  }, []);
 
   // Set page title
   useEffect(() => {
@@ -712,10 +745,21 @@ const SettingsPage: React.FC = () => {
           </aside>
 
           <section className="space-y-4">
-            {alphasiftItem ? (
+            {alphasiftItem && !alphaSiftCardHidden ? (
               <SettingsSectionCard
                 title={t('settings.alphaSift')}
                 description={t('settings.alphaSiftDescription')}
+                actions={(
+                  <button
+                    type="button"
+                    onClick={hideAlphaSiftCard}
+                    aria-label={t('settings.alphaSiftHideCard')}
+                    title={t('settings.alphaSiftHideCard')}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--settings-border)] bg-[var(--settings-surface)] text-muted-text transition-colors hover:bg-[var(--settings-surface-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15"
+                  >
+                    <X aria-hidden="true" className="h-4 w-4" />
+                  </button>
+                )}
               >
                 <div className="flex flex-col gap-4 rounded-2xl border settings-border bg-background/35 px-4 py-4 md:flex-row md:items-center md:justify-between">
                   <div>
@@ -759,6 +803,19 @@ const SettingsPage: React.FC = () => {
                     <SettingsAlert title={t('settings.actionSuccess')} message={alphaSiftActionSuccess} variant="success" />
                   </div>
                 ) : null}
+              </SettingsSectionCard>
+            ) : null}
+            {activeCategory === 'data_source' && alphasiftItem && alphaSiftCardHidden ? (
+              <SettingsSectionCard
+                title={t('settings.alphaSift')}
+                description={t('settings.alphaSiftDescription')}
+              >
+                <div className="flex flex-col gap-3 rounded-2xl border settings-border bg-background/35 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-xs leading-6 text-muted-text">{t('settings.alphaSiftCardHidden')}</p>
+                  <Button type="button" variant="settings-secondary" onClick={showAlphaSiftCard}>
+                    {t('settings.alphaSiftShowCard')}
+                  </Button>
+                </div>
               </SettingsSectionCard>
             ) : null}
             {activeCategory === 'system' ? <AuthSettingsCard /> : null}

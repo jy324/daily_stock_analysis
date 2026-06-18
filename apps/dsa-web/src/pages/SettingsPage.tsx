@@ -1,6 +1,6 @@
 import type React from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Search, X } from 'lucide-react';
 import { useAuth, useSystemConfig } from '../hooks';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from '../api/error';
@@ -22,8 +22,8 @@ import {
   SettingsSectionCard,
 } from '../components/settings';
 import { WEB_BUILD_INFO } from '../utils/constants';
-import { getCategoryDescription } from '../utils/systemConfigI18n';
-import type { SystemConfigCategory } from '../types/systemConfig';
+import { getCategoryDescription, getCategoryTitle, getFieldDescriptionZh, getFieldTitleZh } from '../utils/systemConfigI18n';
+import type { SystemConfigCategory, SystemConfigItem } from '../types/systemConfig';
 import type { UiTextKey } from '../i18n/uiText';
 
 type DesktopWindow = Window & {
@@ -216,6 +216,38 @@ function formatEnvBackupFilename(isDesktopRuntime: boolean) {
 // category (AlphaSift's config home).
 const ALPHASIFT_CARD_HIDDEN_KEY = 'dsa:settings:alphasiftCardHidden';
 
+// UI rendering rule only: hide channel-managed / legacy provider-specific LLM
+// keys when channel mode is active, and keys surfaced via dedicated cards
+// (ALPHASIFT_ENABLED, ADMIN_AUTH_ENABLED). Does not alter save/refresh payloads.
+const LLM_CHANNEL_KEY_RE = /^LLM_[A-Z0-9_]+_(PROTOCOL|BASE_URL|API_KEY|API_KEYS|MODELS|EXTRA_HEADERS|ENABLED)$/;
+const AI_MODEL_HIDDEN_KEYS = new Set([
+  'LLM_CHANNELS', 'LLM_TEMPERATURE', 'LITELLM_MODEL', 'AGENT_LITELLM_MODEL', 'LITELLM_FALLBACK_MODELS',
+  'AIHUBMIX_KEY', 'DEEPSEEK_API_KEY', 'DEEPSEEK_API_KEYS', 'GEMINI_API_KEY', 'GEMINI_API_KEYS',
+  'GEMINI_MODEL', 'GEMINI_MODEL_FALLBACK', 'GEMINI_TEMPERATURE', 'ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEYS',
+  'ANTHROPIC_MODEL', 'ANTHROPIC_TEMPERATURE', 'ANTHROPIC_MAX_TOKENS', 'OPENAI_API_KEY', 'OPENAI_API_KEYS',
+  'OPENAI_BASE_URL', 'OPENAI_MODEL', 'OPENAI_VISION_MODEL', 'OPENAI_TEMPERATURE', 'VISION_MODEL',
+]);
+const SYSTEM_HIDDEN_KEYS = new Set(['ADMIN_AUTH_ENABLED']);
+const DATA_SOURCE_HIDDEN_KEYS = new Set(['ALPHASIFT_ENABLED']);
+
+/** Items a category actually renders as generic fields (shared by the category
+ *  view and global search). */
+function getVisibleSettingsItems(category: string, rawItems: SystemConfigItem[]): SystemConfigItem[] {
+  if (category === 'ai_model') {
+    const map = new Map(rawItems.map((item) => [item.key, String(item.value ?? '')]));
+    const hasChannels = Boolean((map.get('LLM_CHANNELS') || '').trim());
+    const hasLitellm = Boolean((map.get('LITELLM_CONFIG') || '').trim());
+    return rawItems.filter((item) => {
+      if (hasChannels && LLM_CHANNEL_KEY_RE.test(item.key)) return false;
+      if (hasChannels && !hasLitellm && AI_MODEL_HIDDEN_KEYS.has(item.key)) return false;
+      return true;
+    });
+  }
+  if (category === 'system') return rawItems.filter((item) => !SYSTEM_HIDDEN_KEYS.has(item.key));
+  if (category === 'data_source') return rawItems.filter((item) => !DATA_SOURCE_HIDDEN_KEYS.has(item.key));
+  return rawItems;
+}
+
 const SettingsPage: React.FC = () => {
   const { authEnabled, passwordChangeable } = useAuth();
   const { language: uiLanguage, t } = useUiLanguage();
@@ -390,68 +422,43 @@ const SettingsPage: React.FC = () => {
   }, [canCheckDesktopUpdate, desktopRuntimeApi, t]);
 
   const rawActiveItems = itemsByCategory[activeCategory] || [];
-  const rawActiveItemMap = new Map(rawActiveItems.map((item) => [item.key, String(item.value ?? '')]));
   const alphasiftItem = (itemsByCategory.data_source || []).find((item) => item.key === 'ALPHASIFT_ENABLED');
   const alphasiftEnabled = String(alphasiftItem?.value ?? '').trim().toLowerCase() === 'true';
-  const hasConfiguredChannels = Boolean((rawActiveItemMap.get('LLM_CHANNELS') || '').trim());
-  const hasLitellmConfig = Boolean((rawActiveItemMap.get('LITELLM_CONFIG') || '').trim());
+  const activeItems = getVisibleSettingsItems(activeCategory, rawActiveItems);
 
-  // UI rendering rule only: hide channel-managed and legacy provider-specific
-  // LLM keys from generic fields when channel mode is active. This does not
-  // alter save/refresh payloads or config migration/rollback behavior.
-  const LLM_CHANNEL_KEY_RE = /^LLM_[A-Z0-9_]+_(PROTOCOL|BASE_URL|API_KEY|API_KEYS|MODELS|EXTRA_HEADERS|ENABLED)$/;
-  const AI_MODEL_HIDDEN_KEYS = new Set([
-    'LLM_CHANNELS',
-    'LLM_TEMPERATURE',
-    'LITELLM_MODEL',
-    'AGENT_LITELLM_MODEL',
-    'LITELLM_FALLBACK_MODELS',
-    'AIHUBMIX_KEY',
-    'DEEPSEEK_API_KEY',
-    'DEEPSEEK_API_KEYS',
-    'GEMINI_API_KEY',
-    'GEMINI_API_KEYS',
-    'GEMINI_MODEL',
-    'GEMINI_MODEL_FALLBACK',
-    'GEMINI_TEMPERATURE',
-    'ANTHROPIC_API_KEY',
-    'ANTHROPIC_API_KEYS',
-    'ANTHROPIC_MODEL',
-    'ANTHROPIC_TEMPERATURE',
-    'ANTHROPIC_MAX_TOKENS',
-    'OPENAI_API_KEY',
-    'OPENAI_API_KEYS',
-    'OPENAI_BASE_URL',
-    'OPENAI_MODEL',
-    'OPENAI_VISION_MODEL',
-    'OPENAI_TEMPERATURE',
-    'VISION_MODEL',
-  ]);
-  const SYSTEM_HIDDEN_KEYS = new Set([
-    'ADMIN_AUTH_ENABLED',
-  ]);
-  const DATA_SOURCE_HIDDEN_KEYS = new Set([
-    'ALPHASIFT_ENABLED',
-  ]);
-  const AGENT_HIDDEN_KEYS = new Set<string>();
-  const activeItems =
-    activeCategory === 'ai_model'
-      ? rawActiveItems.filter((item) => {
-        if (hasConfiguredChannels && LLM_CHANNEL_KEY_RE.test(item.key)) {
-          return false;
-        }
-        if (hasConfiguredChannels && !hasLitellmConfig && AI_MODEL_HIDDEN_KEYS.has(item.key)) {
-          return false;
-        }
-        return true;
+  // Global config search across all categories.
+  const [searchQuery, setSearchQuery] = useState('');
+  const normalizedQuery = searchQuery.trim().toLowerCase();
+  const isSearching = normalizedQuery.length > 0;
+  const searchResults = useMemo(() => {
+    if (!normalizedQuery) {
+      return [] as { category: string; title: string; items: SystemConfigItem[] }[];
+    }
+    return categories
+      .map((cat) => {
+        const visible = getVisibleSettingsItems(cat.category, itemsByCategory[cat.category] || []);
+        const items = visible.filter((item) => {
+          const haystack = [
+            item.key,
+            item.schema?.title ?? '',
+            item.schema?.description ?? '',
+            getFieldTitleZh(item.key, item.schema?.title ?? ''),
+            getFieldDescriptionZh(item.key, item.schema?.description ?? ''),
+          ].join(' ').toLowerCase();
+          return haystack.includes(normalizedQuery);
+        });
+        return {
+          category: cat.category,
+          title: getCategoryTitle(cat.category as SystemConfigCategory, cat.title, uiLanguage),
+          items,
+        };
       })
-      : activeCategory === 'system'
-        ? rawActiveItems.filter((item) => !SYSTEM_HIDDEN_KEYS.has(item.key))
-      : activeCategory === 'data_source'
-        ? rawActiveItems.filter((item) => !DATA_SOURCE_HIDDEN_KEYS.has(item.key))
-      : activeCategory === 'agent'
-        ? rawActiveItems.filter((item) => !AGENT_HIDDEN_KEYS.has(item.key))
-      : rawActiveItems;
+      .filter((group) => group.items.length > 0);
+  }, [normalizedQuery, categories, itemsByCategory, uiLanguage]);
+  const handleSelectCategory = useCallback((category: string) => {
+    setActiveCategory(category);
+    setSearchQuery('');
+  }, [setActiveCategory]);
   const isEnvBackupAllowed = isDesktopRuntime || authEnabled;
   const envBackupActionDisabled = isLoading || isSaving || isExportingEnv || isImportingEnv || !isEnvBackupAllowed;
 
@@ -692,6 +699,23 @@ const SettingsPage: React.FC = () => {
       className="settings-surface-panel settings-border-strong border-none bg-transparent shadow-none"
     />
   );
+  const searchResultsNode = (
+    <div className="space-y-4">
+      {searchResults.length === 0 ? (
+        <EmptyState
+          title={t('settings.searchNoResults')}
+          description={t('settings.searchNoResultsHint')}
+          className="settings-surface-panel settings-border-strong border-none bg-transparent shadow-none"
+        />
+      ) : (
+        searchResults.map((group) => (
+          <SettingsSectionCard key={group.category} title={`${group.title} · ${group.items.length}`}>
+            {group.items.map(renderSettingsField)}
+          </SettingsSectionCard>
+        ))
+      )}
+    </div>
+  );
 
   return (
     <div className="settings-page min-h-full px-4 pb-6 pt-4 md:px-6">
@@ -730,6 +754,28 @@ const SettingsPage: React.FC = () => {
           </div>
         </div>
 
+        <div className="relative mt-4">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-text" />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder={t('settings.searchPlaceholder')}
+            aria-label={t('settings.searchPlaceholder')}
+            className="input-surface input-focus-glow h-10 w-full rounded-xl border bg-transparent pl-9 pr-10 text-sm transition-all focus:outline-none"
+          />
+          {searchQuery ? (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label={t('common.close')}
+              className="absolute right-2 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-muted-text transition-colors hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-cyan/15"
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+
         {saveError ? (
           <ApiErrorAlert
             className="mt-3"
@@ -758,11 +804,13 @@ const SettingsPage: React.FC = () => {
               categories={categories}
               itemsByCategory={itemsByCategory}
               activeCategory={activeCategory}
-              onSelect={setActiveCategory}
+              onSelect={handleSelectCategory}
             />
           </aside>
 
           <section className="space-y-4">
+            {isSearching ? searchResultsNode : (
+              <>
             {alphasiftItem && !alphaSiftCardHidden ? (
               <SettingsSectionCard
                 title={t('settings.alphaSift')}
@@ -1051,6 +1099,8 @@ const SettingsPage: React.FC = () => {
                 {activeConfigPanel}
               </SettingsPanelErrorBoundary>
             ) : activeConfigPanel}
+              </>
+            )}
           </section>
         </div>
       )}

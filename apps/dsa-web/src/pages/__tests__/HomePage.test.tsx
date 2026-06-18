@@ -794,7 +794,11 @@ describe('HomePage', () => {
     );
 
     expect(await screen.findByText('基础配置未完成')).toBeInTheDocument();
-    expect(screen.getByText(/LLM 主渠道、自选股/)).toBeInTheDocument();
+    // Missing items render as links that deep-link to their settings section.
+    fireEvent.click(screen.getByRole('button', { name: 'LLM 主渠道' }));
+    expect(navigateMock).toHaveBeenCalledWith('/settings?section=ai_model');
+    fireEvent.click(screen.getByRole('button', { name: '自选股' }));
+    expect(navigateMock).toHaveBeenCalledWith('/settings?section=base');
     fireEvent.click(screen.getByRole('button', { name: '去配置' }));
     expect(navigateMock).toHaveBeenCalledWith('/settings');
   });

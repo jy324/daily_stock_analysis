@@ -266,6 +266,37 @@ const SettingsPage: React.FC = () => {
     void load();
   }, [load]);
 
+  // Deep-link support: ?section=<category> (e.g. from the home setup banner)
+  // selects that settings category once the schema has loaded, then strips the
+  // param so refresh/back-navigation doesn't keep forcing the section. Read
+  // from window.location (not a router hook) so the page stays testable in
+  // isolation without a Router context.
+  const sectionAppliedRef = useRef(false);
+  useEffect(() => {
+    if (sectionAppliedRef.current) {
+      return;
+    }
+    // Wait until the schema has loaded so the category can be matched before we
+    // consume (clear) the param.
+    if (isLoading || categories.length === 0) {
+      return;
+    }
+    sectionAppliedRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const section = params.get('section');
+    if (!section) {
+      return;
+    }
+    if (categories.some((category) => category.category === section)) {
+      setActiveCategory(section);
+      window.scrollTo({ top: 0 });
+    }
+    params.delete('section');
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`;
+    window.history.replaceState(window.history.state, '', nextUrl);
+  }, [isLoading, categories, setActiveCategory]);
+
   useEffect(() => {
     if (!toast) {
       return;

@@ -6,7 +6,8 @@ import { useUiLanguage } from '../contexts/UiLanguageContext';
 import { createParsedApiError, getParsedApiError, type ParsedApiError } from '../api/error';
 import { alphasiftApi, notifyAlphaSiftConfigChanged, notifySystemConfigChanged } from '../api/alphasift';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Button, ConfirmDialog, EmptyState } from '../components/common';
+import { ApiErrorAlert, Button, Collapsible, ConfirmDialog, EmptyState } from '../components/common';
+import { groupItems, isGroupedCategory } from '../utils/settingsFieldGroups';
 import {
   AuthSettingsCard,
   ChangePasswordCard,
@@ -651,22 +652,39 @@ const SettingsPage: React.FC = () => {
       ? <>Check and provide the desktop log <code>desktop.log</code>, plus the release version, Windows version, and trigger path.</>
       : <>请查看并提供桌面端日志 <code>desktop.log</code>，同时补充 release 版本、Windows 版本和触发入口。</>
     : t('settings.diagnosticHintWeb');
+  const renderSettingsField = (item: typeof activeItems[number]) => (
+    <SettingsField
+      key={item.key}
+      item={item}
+      value={item.value}
+      disabled={isSaving}
+      onChange={setDraftValue}
+      issues={issueByKey[item.key] || []}
+    />
+  );
   const activeConfigPanel = activeItems.length ? (
-    <SettingsSectionCard
-      title={t('settings.activePanelTitle')}
-      description={getCategoryDescription(activeCategory as SystemConfigCategory, '', uiLanguage) || t('settings.activePanelDescription')}
-    >
-      {activeItems.map((item) => (
-        <SettingsField
-          key={item.key}
-          item={item}
-          value={item.value}
-          disabled={isSaving}
-          onChange={setDraftValue}
-          issues={issueByKey[item.key] || []}
-        />
-      ))}
-    </SettingsSectionCard>
+    isGroupedCategory(activeCategory) ? (
+      <div className="space-y-3">
+        {groupItems(activeCategory, activeItems, uiLanguage).map((group) => (
+          <Collapsible
+            key={group.id}
+            title={`${group.label} · ${group.items.length}`}
+            defaultOpen={group.defaultOpen}
+          >
+            <div className="space-y-5 pt-2">
+              {group.items.map(renderSettingsField)}
+            </div>
+          </Collapsible>
+        ))}
+      </div>
+    ) : (
+      <SettingsSectionCard
+        title={t('settings.activePanelTitle')}
+        description={getCategoryDescription(activeCategory as SystemConfigCategory, '', uiLanguage) || t('settings.activePanelDescription')}
+      >
+        {activeItems.map(renderSettingsField)}
+      </SettingsSectionCard>
+    )
   ) : (
     <EmptyState
       title={t('settings.currentCategoryEmptyTitle')}

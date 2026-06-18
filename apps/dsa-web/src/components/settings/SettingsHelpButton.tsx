@@ -198,7 +198,7 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
 
       {open && typeof document !== 'undefined'
         ? createPortal(
-            <div className="fixed inset-0 z-[140] flex items-end bg-background/25 backdrop-blur-sm sm:items-center sm:justify-center">
+            <div className="animate-fade-in fixed inset-0 z-[140] flex items-end bg-background/25 backdrop-blur-sm sm:items-center sm:justify-center">
               <button
                 type="button"
                 className="absolute inset-0 cursor-default"
@@ -215,6 +215,7 @@ export const SettingsHelpButton: React.FC<SettingsHelpButtonProps> = ({
                 className={cn(
                   'relative flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-2xl border border-border/80 bg-card shadow-soft-card-strong',
                   'sm:max-w-2xl sm:rounded-2xl',
+                  'animate-in fade-in zoom-in duration-200',
                 )}
               >
                 <div className="h-1 w-full bg-gradient-to-r from-cyan/80 via-primary/70 to-purple/70" />

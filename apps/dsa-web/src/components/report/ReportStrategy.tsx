@@ -21,16 +21,17 @@ const StrategyItem: React.FC<StrategyItemProps> = ({
   tone,
 }) => (
   <div className="home-subpanel home-strategy-card p-3" style={{ ['--home-strategy-tone' as string]: `var(${tone})` }}>
-    <div className="flex flex-col">
-      <span className="home-strategy-label mb-0.5 text-xs">{label}</span>
-      <span className="home-strategy-value text-lg font-bold font-mono" style={!value ? { color: 'var(--text-muted-text)' } : undefined}>
+    <div
+      className="absolute top-0 left-0 right-0 h-[3px] rounded-t-[inherit]"
+      style={{ background: `linear-gradient(90deg, transparent 5%, var(${tone}) 50%, transparent 95%)` }}
+      aria-hidden="true"
+    />
+    <div className="flex flex-col pt-1">
+      <span className="home-strategy-label mb-1 text-[11px] font-medium uppercase tracking-wider">{label}</span>
+      <span className="home-strategy-value text-sm font-bold leading-relaxed" style={!value ? { color: 'var(--text-muted-text)' } : undefined}>
         {value || '—'}
       </span>
     </div>
-    <div
-      className="absolute bottom-0 left-0 right-0 h-0.5"
-      style={{ background: `linear-gradient(90deg, transparent, var(${tone}), transparent)` }}
-    />
   </div>
 );
 

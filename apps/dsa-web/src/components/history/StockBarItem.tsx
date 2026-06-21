@@ -119,7 +119,7 @@ export const StockBarItemComponent: React.FC<StockBarItemProps> = ({
             </div>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-2" data-testid="history-card-meta">
-            <span className="text-[11px] text-secondary-text font-mono">
+            <span className="text-[11px] text-secondary-text font-mono tabular-nums">
               {item.stockCode}
             </span>
             {item.lastAnalysisTime && (

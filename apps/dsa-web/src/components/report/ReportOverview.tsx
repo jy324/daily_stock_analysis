@@ -78,6 +78,32 @@ const buildBoardSignalMap = (details?: ReportDetailsType): Map<string, BoardSign
   return signalMap;
 };
 
+const detectAdviceTone = (text: string | undefined): 'sell' | 'buy' | 'hold' => {
+  if (!text) return 'hold';
+  if (/卖出|减仓|清仓|止损|sell|reduce/i.test(text)) return 'sell';
+  if (/买入|加仓|建仓|追入|buy|add/i.test(text)) return 'buy';
+  return 'hold';
+};
+
+const detectTrendTone = (text: string | undefined): 'bearish' | 'bullish' | 'neutral' => {
+  if (!text) return 'neutral';
+  if (/看空|下跌|偏空|空头|bearish|down/i.test(text)) return 'bearish';
+  if (/看多|上涨|偏多|多头|bullish|up/i.test(text)) return 'bullish';
+  return 'neutral';
+};
+
+const ADVICE_TONE_MAP = {
+  sell: { icon: 'text-danger', bgStyle: { background: 'hsl(var(--destructive) / 0.1)' }, tone: 'var(--home-strategy-stop)' },
+  buy: { icon: 'text-success', bgStyle: { background: 'hsl(var(--success) / 0.1)' }, tone: 'var(--home-strategy-buy)' },
+  hold: { icon: 'text-cyan', bgStyle: { background: 'hsl(var(--primary) / 0.1)' }, tone: 'var(--home-strategy-secondary)' },
+} as const;
+
+const TREND_TONE_MAP = {
+  bearish: { icon: 'text-purple', bgStyle: { background: 'hsl(var(--color-purple) / 0.1)' }, tone: 'var(--home-secondary-accent-text)' },
+  bullish: { icon: 'text-success', bgStyle: { background: 'hsl(var(--success) / 0.1)' }, tone: 'var(--home-strategy-buy)' },
+  neutral: { icon: 'text-warning', bgStyle: { background: 'hsl(var(--warning) / 0.1)' }, tone: 'var(--home-strategy-take)' },
+} as const;
+
 /**
  * 报告概览区组件 - 终端风格
  */
@@ -134,6 +160,11 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
     return 'danger';
   };
 
+  const adviceTone = detectAdviceTone(summary.operationAdvice);
+  const trendTone = detectTrendTone(summary.trendPrediction);
+  const adviceStyle = ADVICE_TONE_MAP[adviceTone];
+  const trendStyle = TREND_TONE_MAP[trendTone];
+
   return (
     <div className="space-y-5">
       {/* 主信息区 - 两列布局 */}
@@ -142,25 +173,28 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
         <div className="lg:col-span-2 space-y-5">
           {/* 股票头部 */}
           <Card variant="gradient" padding="md" className="home-report-hero">
-            <div className="flex items-start justify-between mb-5">
+            <div className="home-hero-mesh" aria-hidden="true" />
+            <div className="relative flex items-start justify-between mb-5">
               <div className="flex-1">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-[28px] font-bold leading-tight text-foreground">
+                <div className="flex items-baseline gap-3 flex-wrap">
+                  <h2 className="text-[28px] font-bold leading-tight text-foreground tracking-tight">
                     {meta.stockName || meta.stockCode}
                   </h2>
-                  {/* 价格和涨跌幅 */}
                   {meta.currentPrice != null && (
                     <div className="flex items-baseline gap-2">
-                      <span className="text-xl font-bold font-mono" style={getPriceChangeStyle(meta.changePct)}>
+                      <span className="text-2xl font-extrabold font-mono tabular-nums tracking-tight" style={getPriceChangeStyle(meta.changePct)}>
                         {meta.currentPrice.toFixed(2)}
                       </span>
-                      <span className="text-sm font-semibold font-mono" style={getPriceChangeStyle(meta.changePct)}>
+                      <span
+                        className="home-change-badge rounded-full px-2 py-0.5 text-xs font-bold font-mono tabular-nums"
+                        style={getPriceChangeStyle(meta.changePct)}
+                      >
                         {formatChangePct(meta.changePct)}
                       </span>
                     </div>
                   )}
                 </div>
-                <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                <div className="flex flex-wrap items-center gap-2 mt-2">
                   <span className="home-accent-chip px-2 py-0.5 font-mono text-xs">
                     {meta.stockCode}
                   </span>
@@ -185,7 +219,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
             </div>
 
             {/* 关键结论 */}
-            <div className="home-divider border-t pt-5">
+            <div className="relative home-divider border-t pt-5">
               <span className="label-uppercase">{text.keyInsights}</span>
               <p className="mt-2 max-w-[62ch] whitespace-pre-wrap text-left text-[15px] leading-7 text-foreground">
                 {summary.analysisSummary || text.noAnalysisSummary}
@@ -201,17 +235,18 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                 padding="sm"
                 hoverable
                 className="home-panel-card home-insight-card"
-                style={{ ['--home-insight-tone' as string]: 'var(--home-strategy-buy)' }}
+                style={{ ['--home-insight-tone' as string]: adviceStyle.tone }}
               >
-                <div className="flex items-start gap-3">
-                  <div className="home-insight-icon w-8 h-8 rounded-lg bg-success/10 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-4 h-4 text-success" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="home-insight-accent-bar" aria-hidden="true" />
+                <div className="relative flex items-start gap-3">
+                  <div className="home-insight-icon w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={adviceStyle.bgStyle}>
+                    <svg className={`w-5 h-5 ${adviceStyle.icon}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
                     </svg>
                   </div>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 min-w-0 flex-1">
                     <h4 className="home-insight-title text-[11px] font-medium uppercase tracking-[0.16em]">{text.actionAdvice}</h4>
-                    <p className="home-insight-body text-sm leading-6">
+                    <p className="home-insight-body text-sm font-medium leading-6">
                       {summary.operationAdvice || text.noAdvice}
                     </p>
                   </div>
@@ -253,7 +288,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                             )}
                             {signal && signal.changePct !== undefined && signal.changePct !== null && (
                               <span
-                                className="text-xs font-mono"
+                                className="text-xs font-mono tabular-nums"
                                 style={getPriceChangeStyle(signal.changePct)}
                               >
                                 {formatChangePct(signal.changePct)}
@@ -274,17 +309,18 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
               padding="sm"
               hoverable
               className="home-panel-card home-insight-card"
-              style={{ ['--home-insight-tone' as string]: 'var(--home-strategy-take)' }}
+              style={{ ['--home-insight-tone' as string]: trendStyle.tone }}
             >
-              <div className="flex items-start gap-3">
-                <div className="home-insight-icon w-8 h-8 rounded-lg bg-warning/10 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-4 h-4 text-warning" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="home-insight-accent-bar" aria-hidden="true" />
+              <div className="relative flex items-start gap-3">
+                <div className="home-insight-icon w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={trendStyle.bgStyle}>
+                  <svg className={`w-5 h-5 ${trendStyle.icon}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
                   </svg>
                 </div>
-                <div className="space-y-1.5">
+                <div className="space-y-1.5 min-w-0 flex-1">
                   <h4 className="home-insight-title text-[11px] font-medium uppercase tracking-[0.16em]">{text.trendPrediction}</h4>
-                  <p className="home-insight-body text-sm leading-6">
+                  <p className="home-insight-body text-sm font-medium leading-6">
                     {summary.trendPrediction || text.noPrediction}
                   </p>
                 </div>
@@ -296,7 +332,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
         {/* 右侧：情绪指标 / 自选操作 */}
         <div className="flex flex-col space-y-4">
           {watchlist && meta.reportType !== 'market_review' && (
-            <Card variant="bordered" padding="sm" className="home-panel-card">
+            <Card variant="bordered" padding="sm" className="home-panel-card home-rail-card">
               <div className="text-center space-y-3">
                 <span className="label-uppercase">{t('report.watchlist')}</span>
                 <div className="text-xs text-muted-text font-mono">{meta.stockCode}</div>

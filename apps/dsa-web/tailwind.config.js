@@ -127,6 +127,28 @@ export default {
         '2xl': '16px',
         '3xl': '20px',
       },
+      fontFamily: {
+        sans: [
+          'Inter',
+          'SF Pro Display',
+          'Segoe UI',
+          'PingFang SC',
+          'Hiragino Sans GB',
+          'Microsoft YaHei',
+          'Noto Sans SC',
+          'system-ui',
+          '-apple-system',
+          'sans-serif',
+        ],
+        mono: [
+          'ui-monospace',
+          'SF Mono',
+          'Cascadia Code',
+          'Consolas',
+          'Liberation Mono',
+          'monospace',
+        ],
+      },
       fontSize: {
         xxs: '10px',
         label: '11px',

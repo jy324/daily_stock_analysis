@@ -953,7 +953,7 @@ const HomePage: React.FC = () => {
                     {t('home.historyTrend')}
                   </Button>
                   <Button
-                    variant="home-action-ai"
+                    variant="home-action-report"
                     size="sm"
                     disabled={selectedReport.meta.id === undefined}
                     onClick={openMarkdownDrawer}

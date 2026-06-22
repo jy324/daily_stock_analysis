@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { markdownToPlainText } from '../markdown';
+import { markdownToPlainText, markdownToSummaryText, sanitizeReportMarkdown } from '../markdown';
 
 describe('markdownToPlainText', () => {
   it('removes markdown syntax from links, images, and headings', () => {
@@ -95,5 +95,53 @@ More text.`;
   it('returns empty string for empty or null input', () => {
     expect(markdownToPlainText('')).toBe('');
     expect(markdownToPlainText(null as unknown as string)).toBe('');
+  });
+});
+
+describe('markdownToSummaryText', () => {
+  it('flattens generated markdown into one clean line (no syntax, no newlines)', () => {
+    const md = '# 🎯 大盘复盘\n## 2026-06-22 大盘复盘\n> 今日A股市场整体呈现**小幅上涨**态势。\n### 一、盘面总览';
+    const out = markdownToSummaryText(md);
+    expect(out).not.toMatch(/[#*>]/);
+    expect(out).not.toContain('\n');
+    expect(out).toContain('小幅上涨');
+  });
+
+  it('converts literal backslash-n and collapses whitespace', () => {
+    expect(markdownToSummaryText('a\\nb   c')).toBe('a b c');
+  });
+
+  it('truncates with an ellipsis when maxLen is given', () => {
+    expect(markdownToSummaryText('abcdefghij', 5)).toBe('abcde…');
+  });
+
+  it('returns empty for nullish input', () => {
+    expect(markdownToSummaryText(undefined)).toBe('');
+    expect(markdownToSummaryText(null)).toBe('');
+  });
+});
+
+describe('sanitizeReportMarkdown', () => {
+  it('converts literal backslash-n to real newlines', () => {
+    expect(sanitizeReportMarkdown('line1\\nline2')).toBe('line1\nline2');
+  });
+
+  it('strips the Western up/down circle emoji (A-share color conflict)', () => {
+    expect(sanitizeReportMarkdown('上证 🔴 -0.27%')).toBe('上证  -0.27%');
+    expect(sanitizeReportMarkdown('深证 🟢 +0.05%')).toBe('深证  +0.05%');
+    expect(sanitizeReportMarkdown('🟡 中性')).toBe('中性');
+  });
+
+  it('collapses 3+ blank lines to a single blank line', () => {
+    expect(sanitizeReportMarkdown('a\n\n\n\nb')).toBe('a\n\nb');
+  });
+
+  it('keeps normal structure intact', () => {
+    const md = '# 标题\n\n- 项目1\n- 项目2';
+    expect(sanitizeReportMarkdown(md)).toBe('# 标题\n\n- 项目1\n- 项目2');
+  });
+
+  it('returns empty for nullish input', () => {
+    expect(sanitizeReportMarkdown(undefined)).toBe('');
   });
 });

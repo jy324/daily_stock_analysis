@@ -10,8 +10,9 @@ import type {
   ReportLanguage,
   AshareCapitalEvidence,
 } from '../../types/analysis';
-import { markdownToPlainText } from '../../utils/markdown';
+import { markdownToPlainText, markdownToSummaryText, sanitizeReportMarkdown } from '../../utils/markdown';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
+import { getChangeColorStyle } from '../../utils/priceColor';
 import { Card } from '../common';
 import { Tooltip } from '../common/Tooltip';
 import { ReportMarkdownBody } from './ReportMarkdownBody';
@@ -440,7 +441,7 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
       return;
     }
     try {
-      const value = type === 'markdown' ? content : markdownToPlainText(content);
+      const value = type === 'markdown' ? sanitizeReportMarkdown(content) : markdownToPlainText(content);
       await navigator.clipboard.writeText(value);
       setCopiedType(type);
       window.setTimeout(() => setCopiedType(null), 2000);
@@ -453,7 +454,11 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
     {
       icon: FileText,
       label: marketReviewText.reviewSummary,
-      value: summary?.analysisSummary || marketReviewText.noReviewSummary,
+      // analysisSummary is generated markdown; flatten to clean plain text so
+      // raw #/**/> syntax doesn't leak into the summary card.
+      value: summary?.analysisSummary
+        ? markdownToSummaryText(summary.analysisSummary)
+        : marketReviewText.noReviewSummary,
     },
     {
       icon: Gauge,
@@ -587,11 +592,11 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                   <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
                     <div className="rounded-lg border border-subtle p-3">
                       <p className="label-uppercase">{marketReviewText.advancers}</p>
-                      <p className="mt-1 font-semibold text-foreground">{marketData.breadth.upCount ?? '-'}</p>
+                      <p className="mt-1 font-semibold" style={{ color: 'var(--home-price-up)' }}>{marketData.breadth.upCount ?? '-'}</p>
                     </div>
                     <div className="rounded-lg border border-subtle p-3">
                       <p className="label-uppercase">{marketReviewText.decliners}</p>
-                      <p className="mt-1 font-semibold text-foreground">{marketData.breadth.downCount ?? '-'}</p>
+                      <p className="mt-1 font-semibold" style={{ color: 'var(--home-price-down)' }}>{marketData.breadth.downCount ?? '-'}</p>
                     </div>
                     <div className="rounded-lg border border-subtle p-3">
                       <p className="label-uppercase">{marketReviewText.limitUpDown}</p>
@@ -624,9 +629,14 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                         {marketData.indices.map((index) => (
                           <tr key={index.code || index.name}>
                             <td className="px-2 py-2 font-medium text-foreground">{index.name}</td>
-                            <td className="px-2 py-2 text-secondary-text">{index.current ?? '-'}</td>
-                            <td className="px-2 py-2 text-secondary-text">{index.changePct !== undefined ? `${index.changePct}%` : '-'}</td>
-                            <td className="px-2 py-2 text-secondary-text">{index.high ?? '-'} / {index.low ?? '-'}</td>
+                            <td className="px-2 py-2 font-mono tabular-nums text-secondary-text">{index.current ?? '-'}</td>
+                            <td
+                              className="px-2 py-2 font-mono tabular-nums text-secondary-text"
+                              style={getChangeColorStyle(typeof index.changePct === 'number' ? index.changePct : undefined)}
+                            >
+                              {index.changePct !== undefined ? `${index.changePct > 0 ? '+' : ''}${index.changePct}%` : '-'}
+                            </td>
+                            <td className="px-2 py-2 font-mono tabular-nums text-secondary-text">{index.high ?? '-'} / {index.low ?? '-'}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -687,7 +697,7 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                     <div key={id} className="rounded-lg border border-subtle p-3">
                       <h4 className="mb-2 text-sm font-semibold text-foreground">{title}</h4>
                       <ReportMarkdownBody
-                        content={evidenceContent}
+                        content={sanitizeReportMarkdown(evidenceContent)}
                         className="market-review-markdown"
                       />
                     </div>
@@ -706,7 +716,7 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                   <h3 className="text-base font-semibold text-foreground">{title}</h3>
                 </div>
                 <ReportMarkdownBody
-                  content={sectionContent}
+                  content={sanitizeReportMarkdown(sectionContent)}
                   className="market-review-markdown"
                 />
               </Card>

@@ -10,6 +10,7 @@ import { Badge, Button, Card, ScoreGauge } from '../common';
 import { formatDateTime } from '../../utils/format';
 import { getMarketPhaseSummaryLabel, getPartialBarLabel } from '../../utils/marketPhase';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
+import { getChangeColorStyle } from '../../utils/priceColor';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 
 interface ReportOverviewProps {
@@ -130,21 +131,7 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
   const visibleBoards = boardsExpanded ? relatedBoards : relatedBoards.slice(0, BOARD_CAP);
   const hiddenBoardCount = relatedBoards.length - BOARD_CAP;
 
-  const getPriceChangeStyle = (changePct: number | undefined): React.CSSProperties | undefined => {
-    if (changePct === undefined || changePct === null) {
-      return undefined;
-    }
-
-    if (changePct > 0) {
-      return { color: 'var(--home-price-up)' };
-    }
-
-    if (changePct < 0) {
-      return { color: 'var(--home-price-down)' };
-    }
-
-    return undefined;
-  };
+  const getPriceChangeStyle = getChangeColorStyle;
 
   const formatChangePct = (changePct: number | undefined): string => {
     if (changePct === undefined || changePct === null) return '--';

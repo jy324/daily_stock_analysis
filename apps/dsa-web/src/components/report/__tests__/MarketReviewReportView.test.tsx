@@ -197,6 +197,36 @@ describe('MarketReviewReportView', () => {
     expect(screen.queryByText('Index')).not.toBeInTheDocument();
   });
 
+  it('colors index change with A-share semantics (red up) and shows a + sign', () => {
+    render(
+      <MarketReviewReportView
+        payload={combinedMarketReviewPayload}
+        content="# 大盘复盘"
+        reportLanguage="zh"
+      />,
+    );
+
+    const change = screen.getByText('+1.2%');
+    expect(change).toBeInTheDocument();
+    expect(change.style.color).toBe('var(--home-price-up)');
+  });
+
+  it('flattens markdown in the review summary card (no raw # / ** leaking)', () => {
+    const reportWithMarkdownSummary: AnalysisReport = {
+      ...englishMarketReviewReport,
+      meta: { ...englishMarketReviewReport.meta, reportLanguage: 'zh' },
+      summary: {
+        ...englishMarketReviewReport.summary,
+        analysisSummary: '# 🎯 大盘复盘\n## 概览\n> 今日**小幅上涨**。',
+      },
+    };
+    render(<MarketReviewReportView report={reportWithMarkdownSummary} reportLanguage="zh" />);
+
+    const card = screen.getByText('复盘摘要').closest('div');
+    expect(card?.textContent).toContain('小幅上涨');
+    expect(card?.textContent).not.toMatch(/[#*>]/);
+  });
+
   it('shows "No data" when breadth is not available for a market review payload', () => {
     render(
       <MarketReviewReportView

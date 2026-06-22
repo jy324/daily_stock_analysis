@@ -2,7 +2,7 @@ import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Check, PanelLeft, SlidersHorizontal } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { getParsedApiError, type ParsedApiError } from '../api/error';
+import { getParsedApiError } from '../api/error';
 import { analysisApi } from '../api/analysis';
 import { historyApi } from '../api/history';
 import { agentApi, type SkillInfo } from '../api/agent';
@@ -21,14 +21,8 @@ import { useWatchlist } from '../hooks/useWatchlist';
 import { useUiLanguage } from '../contexts/UiLanguageContext';
 import type { SetupStatusResponse } from '../types/systemConfig';
 import { normalizeReportLanguage } from '../utils/reportLanguage';
-import type { MarketReviewPayload, StockBarItem, TaskInfo } from '../types/analysis';
+import type { StockBarItem, TaskInfo } from '../types/analysis';
 import type { RunFlowSnapshotSource } from '../types/runFlow';
-
-type MarketReviewNotice = {
-  variant: 'success' | 'warning' | 'danger';
-  title: string;
-  message: string;
-} | null;
 
 type RunFlowDrawerState =
   | { open: false }
@@ -39,10 +33,6 @@ const HomePage: React.FC = () => {
   const { language: uiLanguage, t } = useUiLanguage();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isSubmittingMarketReview, setIsSubmittingMarketReview] = useState(false);
-  const [marketReviewNotice, setMarketReviewNotice] = useState<MarketReviewNotice>(null);
-  const [marketReviewError, setMarketReviewError] = useState<ParsedApiError | null>(null);
-  const [marketReviewReport, setMarketReviewReport] = useState<string | null>(null);
-  const [marketReviewPayload, setMarketReviewPayload] = useState<MarketReviewPayload | null>(null);
   const [analysisSkills, setAnalysisSkills] = useState<SkillInfo[]>([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState('');
   const [strategyMenuOpen, setStrategyMenuOpen] = useState(false);
@@ -122,7 +112,18 @@ const HomePage: React.FC = () => {
     isLoadingStockBar,
     loadStockBar,
     refreshStockBar,
+    marketReviewLive,
+    setMarketReviewLive,
+    clearMarketReviewLive,
+    reconcileCompletedAnalysis,
   } = useHomeDashboardState();
+
+  // Live 大盘复盘 view is backed by the store so it survives navigating away
+  // and back (HomePage unmount). Aliases keep the render/JSX unchanged.
+  const marketReviewNotice = marketReviewLive.notice;
+  const marketReviewError = marketReviewLive.error;
+  const marketReviewReport = marketReviewLive.report;
+  const marketReviewPayload = marketReviewLive.payload;
 
   useEffect(() => {
     document.title = t('home.pageTitle');
@@ -360,17 +361,15 @@ const HomePage: React.FC = () => {
     syncTaskFailed,
     refreshActiveTasks,
     removeTask,
+    reconcileCompletedAnalysis,
   });
 
   const watchlistState = useWatchlist();
 
   const clearMarketReviewState = useCallback(() => {
     stopMarketReviewPolling();
-    setMarketReviewReport(null);
-    setMarketReviewPayload(null);
-    setMarketReviewNotice(null);
-    setMarketReviewError(null);
-  }, [stopMarketReviewPolling]);
+    clearMarketReviewLive();
+  }, [stopMarketReviewPolling, clearMarketReviewLive]);
 
   const handleHistoryItemClick = useCallback((recordId: number) => {
     clearMarketReviewState();
@@ -473,12 +472,17 @@ const HomePage: React.FC = () => {
       const poll = async (): Promise<boolean> => {
         if (attempts >= maxAttempts) {
           stopMarketReviewPolling();
-          setMarketReviewReport(null);
-          setMarketReviewPayload(null);
-          setMarketReviewNotice({
-            variant: 'danger',
-            title: t('home.marketReviewTimeout'),
-            message: t('home.marketReviewTimeoutMessage'),
+          setMarketReviewLive({
+            status: 'timeout',
+            taskId: null,
+            report: null,
+            payload: null,
+            error: null,
+            notice: {
+              variant: 'danger',
+              title: t('home.marketReviewTimeout'),
+              message: t('home.marketReviewTimeoutMessage'),
+            },
           });
           scrollMarketReviewFeedbackIntoView();
           return false;
@@ -489,15 +493,20 @@ const HomePage: React.FC = () => {
         try {
           const status = await analysisApi.getStatus(taskId);
           if (status.status === 'pending' || status.status === 'processing') {
-            setMarketReviewReport(null);
-            setMarketReviewPayload(null);
             const progress = typeof status.progress === 'number'
               ? `${status.progress}%`
               : t('home.progressActive');
-            setMarketReviewNotice({
-              variant: 'warning',
-              title: t('home.marketReviewInProgress'),
-              message: t('home.taskStatus', { status: status.status, progress }),
+            setMarketReviewLive({
+              status: status.status,
+              taskId,
+              report: null,
+              payload: null,
+              error: null,
+              notice: {
+                variant: 'warning',
+                title: t('home.marketReviewInProgress'),
+                message: t('home.taskStatus', { status: status.status, progress }),
+              },
             });
             return true;
           }
@@ -507,14 +516,18 @@ const HomePage: React.FC = () => {
             const marketReviewText = typeof status.marketReviewReport === 'string'
               ? status.marketReviewReport
               : '';
-            setMarketReviewReport(marketReviewText ? marketReviewText.trim() : null);
-            setMarketReviewPayload(status.marketReviewPayload ?? null);
-            setMarketReviewNotice({
-              variant: 'success',
-              title: t('home.marketReviewCompleted'),
-              message: marketReviewText ? t('home.marketReviewCompletedWithReport') : t('home.marketReviewCompletedWithoutReport'),
+            setMarketReviewLive({
+              status: 'completed',
+              taskId: null,
+              report: marketReviewText ? marketReviewText.trim() : null,
+              payload: status.marketReviewPayload ?? null,
+              error: null,
+              notice: {
+                variant: 'success',
+                title: t('home.marketReviewCompleted'),
+                message: marketReviewText ? t('home.marketReviewCompletedWithReport') : t('home.marketReviewCompletedWithoutReport'),
+              },
             });
-            setMarketReviewError(null);
             await refreshMarketReviewHistory(true);
             scrollMarketReviewFeedbackIntoView();
             return false;
@@ -522,10 +535,13 @@ const HomePage: React.FC = () => {
 
           if (status.status === 'failed') {
             stopMarketReviewPolling();
-            setMarketReviewReport(null);
-            setMarketReviewPayload(null);
-            setMarketReviewError(
-              getParsedApiError({
+            setMarketReviewLive({
+              status: 'failed',
+              taskId: null,
+              report: null,
+              payload: null,
+              notice: null,
+              error: getParsedApiError({
                 response: {
                   status: 500,
                   data: {
@@ -534,19 +550,23 @@ const HomePage: React.FC = () => {
                   },
                 },
               }),
-            );
-            setMarketReviewNotice(null);
+            });
             scrollMarketReviewFeedbackIntoView();
             return false;
           }
 
           stopMarketReviewPolling();
-          setMarketReviewReport(null);
-          setMarketReviewPayload(null);
-          setMarketReviewNotice({
-            variant: 'danger',
-            title: t('home.marketReviewUnknownStatus'),
-            message: t('home.unknownTaskStatus', { status: status.status }),
+          setMarketReviewLive({
+            status: 'unknown',
+            taskId: null,
+            report: null,
+            payload: null,
+            error: null,
+            notice: {
+              variant: 'danger',
+              title: t('home.marketReviewUnknownStatus'),
+              message: t('home.unknownTaskStatus', { status: status.status }),
+            },
           });
           scrollMarketReviewFeedbackIntoView();
           return false;
@@ -554,10 +574,14 @@ const HomePage: React.FC = () => {
           const parsed = getParsedApiError(err);
           if (attempts >= maxAttempts) {
             stopMarketReviewPolling();
-            setMarketReviewReport(null);
-            setMarketReviewPayload(null);
-            setMarketReviewError(parsed);
-            setMarketReviewNotice(null);
+            setMarketReviewLive({
+              status: 'failed',
+              taskId: null,
+              report: null,
+              payload: null,
+              notice: null,
+              error: parsed,
+            });
             scrollMarketReviewFeedbackIntoView();
             return false;
           }
@@ -577,22 +601,30 @@ const HomePage: React.FC = () => {
         }, intervalMs);
       }
     },
-    [refreshMarketReviewHistory, scrollMarketReviewFeedbackIntoView, stopMarketReviewPolling, t],
+    [refreshMarketReviewHistory, scrollMarketReviewFeedbackIntoView, setMarketReviewLive, stopMarketReviewPolling, t],
   );
 
   const handleTriggerMarketReview = useCallback(async () => {
     setIsSubmittingMarketReview(true);
-    setMarketReviewNotice(null);
-    setMarketReviewError(null);
-    setMarketReviewReport(null);
-    setMarketReviewPayload(null);
+    setMarketReviewLive({
+      status: 'submitting',
+      taskId: null,
+      report: null,
+      payload: null,
+      notice: null,
+      error: null,
+    });
     scrollMarketReviewFeedbackIntoView();
     try {
       const result = await analysisApi.triggerMarketReview({ sendNotification: notify });
-      setMarketReviewNotice({
-        variant: 'success',
-        title: t('home.marketReviewSubmitted'),
-        message: result.message,
+      setMarketReviewLive({
+        status: 'submitting',
+        taskId: result.taskId ?? null,
+        notice: {
+          variant: 'success',
+          title: t('home.marketReviewSubmitted'),
+          message: result.message,
+        },
       });
       scrollMarketReviewFeedbackIntoView();
 
@@ -600,13 +632,34 @@ const HomePage: React.FC = () => {
         await pollMarketReviewStatus(result.taskId);
       }
     } catch (err: unknown) {
-      setMarketReviewError(getParsedApiError(err));
-      setMarketReviewNotice(null);
+      setMarketReviewLive({
+        status: 'failed',
+        taskId: null,
+        report: null,
+        payload: null,
+        notice: null,
+        error: getParsedApiError(err),
+      });
       scrollMarketReviewFeedbackIntoView();
     } finally {
       setIsSubmittingMarketReview(false);
     }
-  }, [notify, pollMarketReviewStatus, scrollMarketReviewFeedbackIntoView, t]);
+  }, [notify, pollMarketReviewStatus, scrollMarketReviewFeedbackIntoView, setMarketReviewLive, t]);
+
+  // On mount, resume polling if a 大盘复盘 was still in-flight when we left the
+  // page (the live state persists in the store across navigation).
+  useEffect(() => {
+    const { status, taskId } = marketReviewLive;
+    if (
+      taskId
+      && (status === 'submitting' || status === 'pending' || status === 'processing')
+      && marketReviewPollTimer.current === null
+    ) {
+      void pollMarketReviewStatus(taskId);
+    }
+    // Run once on mount; resume uses the persisted store snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const mergedStockBarItems = useMemo<StockBarItem[]>(() => {
     const latestMarketReview = marketReviewHistoryItems[0];

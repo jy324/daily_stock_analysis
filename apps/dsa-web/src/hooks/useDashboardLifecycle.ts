@@ -14,6 +14,7 @@ type UseDashboardLifecycleOptions = {
   syncTaskUpdated: (task: TaskInfo) => void;
   syncTaskFailed: (task: TaskInfo) => void;
   removeTask: (taskId: string) => void;
+  reconcileCompletedAnalysis?: (completedStockCode?: string) => Promise<void>;
   enabled?: boolean;
 };
 
@@ -29,6 +30,7 @@ export function useDashboardLifecycle({
   syncTaskUpdated,
   syncTaskFailed,
   removeTask,
+  reconcileCompletedAnalysis,
   enabled = true,
 }: UseDashboardLifecycleOptions): void {
   const removalTimeoutsRef = useRef<number[]>([]);
@@ -98,11 +100,21 @@ export function useDashboardLifecycle({
     onTaskStarted: syncTaskUpdated,
     onTaskProgress: syncTaskUpdated,
     onConnected: () => {
-      void refreshActiveTasks();
+      // On (re)connect — incl. returning to the page after navigating away —
+      // refresh tasks + history, then recover an analysis that finished while
+      // the stream was disconnected by auto-selecting its report.
+      void (async () => {
+        await refreshActiveTasks();
+        await refreshHistory(true);
+        await reconcileCompletedAnalysis?.();
+      })();
     },
     onTaskCompleted: (task) => {
       syncTaskUpdated(task);
-      void refreshHistory(true);
+      void (async () => {
+        await refreshHistory(true);
+        await reconcileCompletedAnalysis?.(task.stockCode);
+      })();
       void refreshStockBar();
       void refreshMarketReviewHistory?.(true);
       scheduleTaskRemoval(task.taskId, 2_000);

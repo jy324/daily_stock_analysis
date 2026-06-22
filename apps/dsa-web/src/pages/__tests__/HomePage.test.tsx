@@ -740,17 +740,20 @@ describe('HomePage', () => {
     fireEvent.click(await screen.findByRole('button', { name: '大盘复盘' }));
 
     const dashboardScroll = screen.getByTestId('home-dashboard-scroll');
+    // Live review has no summary, so the structured tab is shown by default.
+    expect(await screen.findByRole('heading', { name: '结构化大盘数据' })).toBeInTheDocument();
+    expect(screen.getByText('3200')).toBeInTheDocument();
+    expect(screen.getByText('3150.2')).toBeInTheDocument();
+
+    // The full markdown原文 now lives in its own tab (no longer same-screen).
+    fireEvent.click(screen.getByRole('tab', { name: '原文报告' }));
     const marketReviewReport = await screen.findByTestId('market-review-report');
     expect(dashboardScroll).toContainElement(marketReviewReport);
     expect(marketReviewReport.className).not.toContain('max-h-64');
     expect(marketReviewReport.className).not.toContain('overflow-y-auto');
-    expect(screen.getByRole('heading', { name: '结构化大盘数据' })).toBeInTheDocument();
-    expect(screen.getByText('3200')).toBeInTheDocument();
-    expect(screen.getByText('3150.2')).toBeInTheDocument();
     expect(marketReviewReport.querySelector('h2, h3')?.textContent).not.toBe('A股市场复盘');
     expect(screen.getByRole('heading', { name: '指数概览' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '风险提示' })).toBeInTheDocument();
-    expect(screen.getAllByRole('table').length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText('# A股市场复盘')).not.toBeInTheDocument();
     expect(screen.queryByText('开始分析')).not.toBeInTheDocument();
   });
@@ -1118,6 +1121,8 @@ describe('HomePage', () => {
 
     await screen.findByText('大盘复盘摘要');
     expect(screen.queryByRole('heading', { name: '大盘复盘详情' })).not.toBeInTheDocument();
+    // The full markdown now lives in its own tab; switch to it.
+    fireEvent.click(screen.getByRole('tab', { name: '原文报告' }));
     expect(await screen.findByRole('heading', { name: '市场情绪与赚钱效应' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '行业/主题轮动' })).toBeInTheDocument();
     expect(screen.getByText('赚钱效应')).toBeInTheDocument();
@@ -1218,7 +1223,9 @@ describe('HomePage', () => {
       expect(screen.queryByText('大盘复盘已完成')).not.toBeInTheDocument();
     });
     expect(await screen.findByText('大盘复盘摘要')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: '市场情绪与赚钱效应' })).toBeInTheDocument();
+    // markdown原文 is in its own tab now
+    fireEvent.click(screen.getByRole('tab', { name: '原文报告' }));
+    expect(await screen.findByRole('heading', { name: '市场情绪与赚钱效应' })).toBeInTheDocument();
     expect(vi.mocked(historyApi.getDetail)).toHaveBeenCalledWith(2);
   });
 });

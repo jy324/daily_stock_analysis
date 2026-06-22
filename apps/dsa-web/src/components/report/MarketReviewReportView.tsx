@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, ChevronDown, Clipboard, FileText, Gauge, Layers, ShieldAlert, TrendingUp, WalletCards, Workflow } from 'lucide-react';
+import { BarChart3, Clipboard, FileText, Gauge, Layers, ShieldAlert, TrendingUp, WalletCards, Workflow } from 'lucide-react';
 import { historyApi } from '../../api/history';
 import { formatUiText, UI_TEXT } from '../../i18n/uiText';
 import type {
@@ -28,6 +28,7 @@ interface MarketReviewReportViewProps {
 }
 
 type CopyType = 'markdown' | 'text';
+type MarketReviewTab = 'summary' | 'structured' | 'raw' | 'evidence';
 type LoadedMarkdown = {
   recordId: number;
   content: string;
@@ -311,6 +312,10 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
   highLow: string;
   inputEvidence: string;
   evidenceMetadata: string;
+  tabSummary: string;
+  tabStructured: string;
+  tabRaw: string;
+  tabEvidence: string;
 }> = {
   zh: {
     reviewSummary: '复盘摘要',
@@ -332,6 +337,10 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     highLow: '高/低',
     inputEvidence: '输入证据',
     evidenceMetadata: '证据元数据',
+    tabSummary: '报告摘要',
+    tabStructured: '结构化数据',
+    tabRaw: '原文报告',
+    tabEvidence: '证据与诊断',
   },
   en: {
     reviewSummary: 'Review Summary',
@@ -353,6 +362,10 @@ const MARKET_REVIEW_TEXT: Record<ReportLanguage, {
     highLow: 'High/Low',
     inputEvidence: 'Input Evidence',
     evidenceMetadata: 'Evidence Metadata',
+    tabSummary: 'Summary',
+    tabStructured: 'Structured Data',
+    tabRaw: 'Full Report',
+    tabEvidence: 'Evidence & Diagnostics',
   },
 };
 
@@ -479,6 +492,30 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
     },
   ], [marketReviewText, summary, text.marketSentiment]);
 
+  // Split the long single-scroll body into tabs so structured data and the
+  // full markdown原文 are no longer shown at once (avoids duplication noise).
+  const availableTabs = useMemo(() => {
+    const tabs: { id: MarketReviewTab; label: string }[] = [];
+    if (summary) {
+      tabs.push({ id: 'summary', label: marketReviewText.tabSummary });
+    }
+    if (structuredMarketData.length > 0) {
+      tabs.push({ id: 'structured', label: marketReviewText.tabStructured });
+    }
+    if (sections.length > 0 || isLoading || error) {
+      tabs.push({ id: 'raw', label: marketReviewText.tabRaw });
+    }
+    if (inputEvidenceSections.length > 0) {
+      tabs.push({ id: 'evidence', label: marketReviewText.tabEvidence });
+    }
+    return tabs;
+  }, [summary, structuredMarketData.length, sections.length, isLoading, error, inputEvidenceSections.length, marketReviewText]);
+
+  const [activeTab, setActiveTab] = useState<MarketReviewTab>('summary');
+  const effectiveTab = availableTabs.some((t) => t.id === activeTab)
+    ? activeTab
+    : (availableTabs[0]?.id ?? 'summary');
+
   return (
     <div className={`animate-fade-in space-y-4 pb-8 ${className}`}>
       <Card variant="gradient" padding="md" className="home-report-hero text-left">
@@ -556,7 +593,28 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
         </div>
       </Card>
 
-      {summary ? (
+      {availableTabs.length > 1 ? (
+        <div className="flex flex-wrap gap-1.5 border-b border-subtle" role="tablist" aria-label="market review sections">
+          {availableTabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={effectiveTab === tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`-mb-px rounded-t-lg px-3 py-2 text-sm font-medium transition-colors ${
+                effectiveTab === tab.id
+                  ? 'border-b-2 border-primary text-foreground'
+                  : 'border-b-2 border-transparent text-secondary-text hover:text-foreground'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {effectiveTab === 'summary' && summary ? (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           {insightCards.map(({ icon: Icon, label, value }) => (
             <Card key={label} variant="bordered" padding="sm" className="home-panel-card text-left">
@@ -574,7 +632,7 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
         </div>
       ) : null}
 
-      {structuredMarketData.length > 0 ? (
+      {effectiveTab === 'structured' && structuredMarketData.length > 0 ? (
         <Card variant="bordered" padding="md" className="home-panel-card text-left">
           <div className="mb-3 flex items-center gap-2">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -649,63 +707,24 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
         </Card>
       ) : null}
 
-      {isLoading ? (
-        <Card variant="bordered" padding="md" className="home-panel-card text-left">
-          <div className="flex h-64 flex-col items-center justify-center">
-            <div className="home-spinner h-10 w-10 animate-spin border-[3px]" />
-            <p className="mt-4 text-sm text-secondary-text">{text.loadingReport}</p>
-          </div>
-        </Card>
-      ) : error ? (
-        <Card variant="bordered" padding="md" className="home-panel-card text-left">
-          <div className="flex h-64 flex-col items-center justify-center">
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-danger/10">
-              <ShieldAlert className="h-6 w-6 text-danger" aria-hidden="true" />
+      {effectiveTab === 'raw' ? (
+        isLoading ? (
+          <Card variant="bordered" padding="md" className="home-panel-card text-left">
+            <div className="flex h-64 flex-col items-center justify-center">
+              <div className="home-spinner h-10 w-10 animate-spin border-[3px]" />
+              <p className="mt-4 text-sm text-secondary-text">{text.loadingReport}</p>
             </div>
-            <p className="text-sm text-danger">{error}</p>
-          </div>
-        </Card>
-      ) : (
-        <>
-          {inputEvidenceSections.length > 0 ? (
-            <Card variant="bordered" padding="md" className="home-panel-card text-left">
-              <details>
-                <summary className="flex cursor-pointer list-none items-center gap-2 text-base font-semibold text-foreground">
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <WalletCards className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <span>{marketReviewText.inputEvidence}</span>
-                  <ChevronDown className="ml-auto h-4 w-4 text-secondary-text" aria-hidden="true" />
-                </summary>
-                <div className="mt-4 space-y-4">
-                  {inputEvidenceMetadata.length > 0 ? (
-                    <div>
-                      <p className="label-uppercase mb-2">{marketReviewText.evidenceMetadata}</p>
-                      <div className="flex flex-wrap gap-2">
-                        {inputEvidenceMetadata.map((item) => (
-                          <span
-                            key={item.id}
-                            className="rounded-lg border border-subtle px-2.5 py-1 text-xs text-secondary-text"
-                          >
-                            <span className="font-semibold text-foreground">{item.label}</span>: {item.value}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                  {inputEvidenceSections.map(({ id, title, content: evidenceContent }) => (
-                    <div key={id} className="rounded-lg border border-subtle p-3">
-                      <h4 className="mb-2 text-sm font-semibold text-foreground">{title}</h4>
-                      <ReportMarkdownBody
-                        content={sanitizeReportMarkdown(evidenceContent)}
-                        className="market-review-markdown"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </details>
-            </Card>
-          ) : null}
+          </Card>
+        ) : error ? (
+          <Card variant="bordered" padding="md" className="home-panel-card text-left">
+            <div className="flex h-64 flex-col items-center justify-center">
+              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-danger/10">
+                <ShieldAlert className="h-6 w-6 text-danger" aria-hidden="true" />
+              </div>
+              <p className="text-sm text-danger">{error}</p>
+            </div>
+          </Card>
+        ) : (
           <div data-testid="market-review-report" className="space-y-4">
             {sections.map(({ id, title, content: sectionContent, icon: Icon }) => (
               <Card key={id} variant="bordered" padding="md" className="home-panel-card text-left">
@@ -722,8 +741,45 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
               </Card>
             ))}
           </div>
-        </>
-      )}
+        )
+      ) : null}
+
+      {effectiveTab === 'evidence' && inputEvidenceSections.length > 0 ? (
+        <Card variant="bordered" padding="md" className="home-panel-card text-left">
+          <div className="mb-3 flex items-center gap-2">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <WalletCards className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <h3 className="text-base font-semibold text-foreground">{marketReviewText.inputEvidence}</h3>
+          </div>
+          <div className="space-y-4">
+            {inputEvidenceMetadata.length > 0 ? (
+              <div>
+                <p className="label-uppercase mb-2">{marketReviewText.evidenceMetadata}</p>
+                <div className="flex flex-wrap gap-2">
+                  {inputEvidenceMetadata.map((item) => (
+                    <span
+                      key={item.id}
+                      className="rounded-lg border border-subtle px-2.5 py-1 text-xs text-secondary-text"
+                    >
+                      <span className="font-semibold text-foreground">{item.label}</span>: {item.value}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {inputEvidenceSections.map(({ id, title, content: evidenceContent }) => (
+              <div key={id} className="rounded-lg border border-subtle p-3">
+                <h4 className="mb-2 text-sm font-semibold text-foreground">{title}</h4>
+                <ReportMarkdownBody
+                  content={sanitizeReportMarkdown(evidenceContent)}
+                  className="market-review-markdown"
+                />
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
     </div>
   );
 };

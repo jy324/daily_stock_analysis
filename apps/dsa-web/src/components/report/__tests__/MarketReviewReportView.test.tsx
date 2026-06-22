@@ -243,7 +243,7 @@ describe('MarketReviewReportView', () => {
     expect(screen.queryByText('Decliners')).not.toBeInTheDocument();
   });
 
-  it('renders ashare capital evidence inside a collapsed input evidence panel', () => {
+  it('renders ashare capital evidence inside the evidence tab', () => {
     render(
       <MarketReviewReportView
         payload={ashareEvidencePayload}
@@ -251,6 +251,9 @@ describe('MarketReviewReportView', () => {
         reportLanguage="zh"
       />,
     );
+
+    // Evidence (ashare_capital_evidence) now lives in its own tab.
+    fireEvent.click(screen.getByRole('tab', { name: '证据与诊断' }));
 
     expect(screen.getByText('输入证据')).toBeInTheDocument();
     expect(screen.getByText('证据元数据')).toBeInTheDocument();
@@ -263,8 +266,45 @@ describe('MarketReviewReportView', () => {
     expect(screen.getByText(/revision/)).toBeInTheDocument();
     expect(screen.getByText(/sector_fund_flow partial/)).toBeInTheDocument();
     expect(screen.getByText('资金与情绪：客观数据')).toBeInTheDocument();
+    // The non-evidence section lives in the 原文报告 tab, not here.
+    expect(screen.queryByText('资金与情绪：分析解读')).not.toBeInTheDocument();
+
+    // Switch to the raw report tab: the interpretation section shows there,
+    // and that tab does not duplicate the evidence section.
+    fireEvent.click(screen.getByRole('tab', { name: '原文报告' }));
     expect(screen.getByText('资金与情绪：分析解读')).toBeInTheDocument();
     expect(screen.queryByTestId('market-review-report')?.textContent).not.toContain('资金与情绪：客观数据');
+  });
+
+  it('splits content into tabs and switches between them', () => {
+    const reportWithSummary: AnalysisReport = {
+      ...englishMarketReviewReport,
+      meta: { ...englishMarketReviewReport.meta, reportLanguage: 'zh' },
+      summary: {
+        analysisSummary: '今日小幅上涨。',
+        operationAdvice: '控制回撤。',
+        trendPrediction: '震荡。',
+        sentimentScore: 50,
+      },
+    };
+    render(
+      <MarketReviewReportView
+        report={reportWithSummary}
+        payload={combinedMarketReviewPayload}
+        content="# 大盘复盘"
+        reportLanguage="zh"
+      />,
+    );
+
+    // Tab bar present; summary is the default tab.
+    expect(screen.getByRole('tab', { name: '报告摘要' })).toBeInTheDocument();
+    expect(screen.getByText('今日小幅上涨。')).toBeInTheDocument();
+    expect(screen.queryByText('结构化大盘数据')).not.toBeInTheDocument();
+
+    // Switching to the structured tab reveals structured data and hides summary.
+    fireEvent.click(screen.getByRole('tab', { name: '结构化数据' }));
+    expect(screen.getByText('结构化大盘数据')).toBeInTheDocument();
+    expect(screen.queryByText('今日小幅上涨。')).not.toBeInTheDocument();
   });
 
   it('opens run flow for historical market review records', () => {

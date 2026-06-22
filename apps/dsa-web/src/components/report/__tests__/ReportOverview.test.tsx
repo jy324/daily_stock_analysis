@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { ReportOverview } from '../ReportOverview';
 
@@ -166,7 +166,39 @@ describe('ReportOverview', () => {
 
     expect(actionAdviceTitle.compareDocumentPosition(relatedBoardsRegion) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('沪股通')).toBeInTheDocument();
-    expect(boardList).toHaveClass('flex-nowrap', 'overflow-x-auto');
+    // Boards now wrap instead of horizontally scrolling (no drag required).
+    expect(boardList).toHaveClass('flex-wrap');
+    expect(boardList).not.toHaveClass('overflow-x-auto');
+  });
+
+  it('collapses related boards beyond the cap and toggles on expand', () => {
+    const belongBoards = Array.from({ length: 12 }, (_, i) => ({ name: `板块${i + 1}` }));
+    render(
+      <ReportOverview
+        meta={baseMeta}
+        summary={baseSummary}
+        details={{ belongBoards }}
+      />,
+    );
+
+    // Default collapsed: first 8 shown, 9th hidden, toggle shows hidden count.
+    expect(screen.getByText('板块8')).toBeInTheDocument();
+    expect(screen.queryByText('板块9')).not.toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: /展开 \+4/ });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    // Expand: all shown, toggle becomes 收起.
+    fireEvent.click(toggle);
+    expect(screen.getByText('板块12')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '收起' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('does not show a toggle when boards are within the cap', () => {
+    const belongBoards = Array.from({ length: 5 }, (_, i) => ({ name: `板块${i + 1}` }));
+    render(<ReportOverview meta={baseMeta} summary={baseSummary} details={{ belongBoards }} />);
+
+    expect(screen.getByText('板块5')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /展开/ })).not.toBeInTheDocument();
   });
 
   it('shows board list when rankings are unavailable', () => {

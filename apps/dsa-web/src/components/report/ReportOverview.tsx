@@ -1,4 +1,6 @@
 import type React from 'react';
+import { useState } from 'react';
+import { Star } from 'lucide-react';
 import type {
   ReportDetails as ReportDetailsType,
   ReportMeta,
@@ -123,6 +125,10 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
   const relatedBoards = (Array.isArray(details?.belongBoards) ? details.belongBoards : [])
     .filter((board) => normalizeBoardName(board?.name).length > 0);
   const boardSignals = buildBoardSignalMap(details);
+  const [boardsExpanded, setBoardsExpanded] = useState(false);
+  const BOARD_CAP = 8;
+  const visibleBoards = boardsExpanded ? relatedBoards : relatedBoards.slice(0, BOARD_CAP);
+  const hiddenBoardCount = relatedBoards.length - BOARD_CAP;
 
   const getPriceChangeStyle = (changePct: number | undefined): React.CSSProperties | undefined => {
     if (changePct === undefined || changePct === null) {
@@ -216,6 +222,29 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                   </span>
                 </div>
               </div>
+
+              {watchlist && meta.reportType !== 'market_review' ? (
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <Button
+                    variant={watchlist.isInWatchlist(meta.stockCode) ? 'danger-subtle' : 'secondary'}
+                    size="sm"
+                    isLoading={watchlist.isActioning}
+                    onClick={() => watchlist.onToggle(meta.stockCode)}
+                    className="gap-1.5 text-xs"
+                    aria-pressed={watchlist.isInWatchlist(meta.stockCode)}
+                  >
+                    <Star
+                      className="h-3.5 w-3.5"
+                      fill={watchlist.isInWatchlist(meta.stockCode) ? 'currentColor' : 'none'}
+                      aria-hidden="true"
+                    />
+                    {watchlist.isInWatchlist(meta.stockCode) ? t('report.removeFromWatchlist') : t('report.addToWatchlist')}
+                  </Button>
+                  {watchlist.actionMessage ? (
+                    <p className="text-[11px] text-secondary-text animate-in fade-in">{watchlist.actionMessage}</p>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             {/* 关键结论 */}
@@ -257,12 +286,11 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                 <Card variant="bordered" padding="sm" className="home-panel-card text-left">
                   <section aria-label={text.relatedBoards}>
                     <div className="mb-3 flex items-baseline gap-2">
-                      <span className="label-uppercase">{text.boardLinkage}</span>
-                      <h3 className="mt-0.5 text-base font-semibold text-foreground">{text.relatedBoards}</h3>
+                      <h3 className="text-base font-semibold text-foreground">{text.relatedBoards}</h3>
                     </div>
 
-                    <div className="home-related-board-list flex flex-nowrap items-center gap-2 overflow-x-auto pb-1">
-                      {relatedBoards.map((board, index) => {
+                    <div className="home-related-board-list flex flex-wrap items-center gap-2">
+                      {visibleBoards.map((board, index) => {
                         const boardName = normalizeBoardName(board.name);
                         const signal = boardSignals.get(boardName);
                         return (
@@ -297,6 +325,16 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
                           </div>
                         );
                       })}
+                      {relatedBoards.length > BOARD_CAP ? (
+                        <button
+                          type="button"
+                          onClick={() => setBoardsExpanded((prev) => !prev)}
+                          aria-expanded={boardsExpanded}
+                          className="home-accent-pill-link shrink-0 whitespace-nowrap px-2.5 py-1 text-xs font-medium"
+                        >
+                          {boardsExpanded ? text.collapse : `${text.expand} +${hiddenBoardCount}`}
+                        </button>
+                      ) : null}
                     </div>
                   </section>
                 </Card>
@@ -329,28 +367,8 @@ export const ReportOverview: React.FC<ReportOverviewProps> = ({
           </div>
         </div>
 
-        {/* 右侧：情绪指标 / 自选操作 */}
+        {/* 右侧：情绪指标 */}
         <div className="flex flex-col space-y-4">
-          {watchlist && meta.reportType !== 'market_review' && (
-            <Card variant="bordered" padding="sm" className="home-panel-card home-rail-card">
-              <div className="text-center space-y-3">
-                <span className="label-uppercase">{t('report.watchlist')}</span>
-                <div className="text-xs text-muted-text font-mono">{meta.stockCode}</div>
-                <Button
-                  variant={watchlist.isInWatchlist(meta.stockCode) ? 'danger-subtle' : 'secondary'}
-                  size="sm"
-                  isLoading={watchlist.isActioning}
-                  onClick={() => watchlist.onToggle(meta.stockCode)}
-                  className="w-full text-xs"
-                >
-                  {watchlist.isInWatchlist(meta.stockCode) ? t('report.removeFromWatchlist') : t('report.addToWatchlist')}
-                </Button>
-                {watchlist.actionMessage && (
-                  <p className="text-[11px] text-secondary-text animate-in fade-in">{watchlist.actionMessage}</p>
-                )}
-              </div>
-            </Card>
-          )}
           <Card variant="bordered" padding="md" className="home-panel-card home-rail-card !overflow-visible">
             <div className="text-center">
               <h3 className="mb-5 text-sm font-medium tracking-wide text-foreground">{text.marketSentiment}</h3>

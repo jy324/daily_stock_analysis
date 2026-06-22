@@ -71,6 +71,10 @@ export function useHomeDashboardState() {
       isLoadingStockBar: state.isLoadingStockBar,
       loadStockBar: state.loadStockBar,
       refreshStockBar: state.refreshStockBar,
+      marketReviewLive: state.marketReviewLive,
+      setMarketReviewLive: state.setMarketReviewLive,
+      clearMarketReviewLive: state.clearMarketReviewLive,
+      reconcileCompletedAnalysis: state.reconcileCompletedAnalysis,
     })),
   );
 

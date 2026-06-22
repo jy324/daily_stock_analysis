@@ -3,7 +3,7 @@ import { analysisApi, DuplicateTaskError } from '../api/analysis';
 import type { ParsedApiError } from '../api/error';
 import { getParsedApiError } from '../api/error';
 import { historyApi } from '../api/history';
-import type { AnalysisReport, HistoryItem, HistoryListResponse, ReportLanguage, StockBarItem, StockHistoryFilters, StockHistoryRange, TaskInfo } from '../types/analysis';
+import type { AnalysisReport, HistoryItem, HistoryListResponse, MarketReviewPayload, ReportLanguage, StockBarItem, StockHistoryFilters, StockHistoryRange, TaskInfo } from '../types/analysis';
 import { getRecentStartDate, getTodayInShanghai } from '../utils/format';
 import { isObviouslyInvalidStockQuery, looksLikeStockCode, validateStockCode } from '../utils/validation';
 
@@ -13,6 +13,46 @@ const MARKET_REVIEW_HISTORY_PAGE_SIZE = 10;
 const MARKET_REVIEW_HISTORY_CODE = 'MARKET';
 
 type SelectionSource = 'manual' | 'autocomplete' | 'import' | 'image';
+
+/**
+ * Live (in-flight) 大盘复盘 state. Kept in the store so it survives HomePage
+ * unmount (e.g. navigating to Settings and back) instead of being lost with
+ * component-local useState. The notice text is built by HomePage via i18n and
+ * passed through here as data.
+ */
+export type MarketReviewLiveStatus =
+  | 'idle'
+  | 'submitting'
+  | 'pending'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'timeout'
+  | 'unknown';
+
+export type MarketReviewLiveNotice = {
+  variant: 'success' | 'warning' | 'danger';
+  title: string;
+  message: string;
+} | null;
+
+export interface MarketReviewLiveState {
+  status: MarketReviewLiveStatus;
+  taskId: string | null;
+  report: string | null;
+  payload: MarketReviewPayload | null;
+  notice: MarketReviewLiveNotice;
+  error: ParsedApiError | null;
+}
+
+const EMPTY_MARKET_REVIEW_LIVE: MarketReviewLiveState = {
+  status: 'idle',
+  taskId: null,
+  report: null,
+  payload: null,
+  notice: null,
+  error: null,
+};
 
 type FetchHistoryOptions = {
   autoSelectFirst?: boolean;
@@ -77,6 +117,8 @@ export interface StockPoolState {
   markdownDrawerOpen: boolean;
   stockBarItems: StockBarItem[];
   isLoadingStockBar: boolean;
+  marketReviewLive: MarketReviewLiveState;
+  pendingAnalysisStockCode: string | null;
   setQuery: (query: string) => void;
   clearError: () => void;
   clearInlineMessages: () => void;
@@ -109,6 +151,9 @@ export interface StockPoolState {
   resetDashboardState: () => void;
   loadStockBar: () => Promise<void>;
   refreshStockBar: () => Promise<void>;
+  setMarketReviewLive: (partial: Partial<MarketReviewLiveState>) => void;
+  clearMarketReviewLive: () => void;
+  reconcileCompletedAnalysis: (completedStockCode?: string) => Promise<void>;
 }
 
 const initialState = {
@@ -152,6 +197,8 @@ const initialState = {
   markdownDrawerOpen: false,
   stockBarItems: [] as StockBarItem[],
   isLoadingStockBar: false,
+  marketReviewLive: EMPTY_MARKET_REVIEW_LIVE,
+  pendingAnalysisStockCode: null as string | null,
 };
 
 function buildHistoryParams(page: number) {
@@ -801,6 +848,9 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
       set({
         query: '',
         selectionSource: 'manual',
+        // Remember the stock the user just launched so its report can be
+        // auto-selected on completion (incl. completion missed while away).
+        pendingAnalysisStockCode: normalizedStockCode,
       });
     } catch (error) {
       if (requestId !== analyzeRequestSeq) {
@@ -944,5 +994,48 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     } catch {
       // keep existing items on error
     }
+  },
+
+  setMarketReviewLive: (partial) => {
+    set({ marketReviewLive: { ...get().marketReviewLive, ...partial } });
+  },
+
+  clearMarketReviewLive: () => {
+    set({ marketReviewLive: EMPTY_MARKET_REVIEW_LIVE });
+  },
+
+  reconcileCompletedAnalysis: async (completedStockCode) => {
+    const pending = get().pendingAnalysisStockCode;
+    if (!pending) {
+      return;
+    }
+    // Only act on the stock the user themself launched (avoid hijacking the
+    // report they are currently reading).
+    if (completedStockCode && completedStockCode !== pending) {
+      return;
+    }
+    // Reconnect path (no explicit completion): skip while the analysis is still
+    // running so we don't surface a stale older record for the same stock.
+    if (!completedStockCode) {
+      const stillActive = get().activeTasks.some(
+        (task) => task.stockCode === pending
+          && (task.status === 'pending' || task.status === 'processing'),
+      );
+      if (stillActive) {
+        return;
+      }
+    }
+    const match = get().historyItems.find(
+      (item) => item.stockCode === pending && item.reportType !== 'market_review',
+    );
+    if (!match) {
+      return;
+    }
+    if (get().selectedReport?.meta.id === match.id) {
+      set({ pendingAnalysisStockCode: null });
+      return;
+    }
+    await get().selectHistoryItem(match.id);
+    set({ pendingAnalysisStockCode: null });
   },
 }));

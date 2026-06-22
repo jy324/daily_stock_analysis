@@ -839,4 +839,88 @@ describe('stockPoolStore', () => {
       forceRefresh: true,
     }));
   });
+
+  it('persists and clears live 大盘复盘 state across the store', () => {
+    useStockPoolStore.getState().setMarketReviewLive({
+      status: 'processing',
+      taskId: 'mr-1',
+      notice: { variant: 'warning', title: 'in progress', message: '10%' },
+    });
+
+    let live = useStockPoolStore.getState().marketReviewLive;
+    expect(live.status).toBe('processing');
+    expect(live.taskId).toBe('mr-1');
+    expect(live.notice?.message).toBe('10%');
+
+    // Partial update keeps untouched fields (survives navigation/unmount).
+    useStockPoolStore.getState().setMarketReviewLive({ status: 'completed', report: 'done', taskId: null });
+    live = useStockPoolStore.getState().marketReviewLive;
+    expect(live.status).toBe('completed');
+    expect(live.report).toBe('done');
+    expect(live.notice?.message).toBe('10%');
+
+    useStockPoolStore.getState().clearMarketReviewLive();
+    live = useStockPoolStore.getState().marketReviewLive;
+    expect(live.status).toBe('idle');
+    expect(live.report).toBeNull();
+    expect(live.taskId).toBeNull();
+  });
+
+  it('records the pending analysis stock and auto-selects its report on completion', async () => {
+    vi.mocked(analysisApi.analyzeAsync).mockResolvedValue({
+      taskId: 'task-600519',
+      stockCode: '600519',
+      status: 'pending',
+      message: 'accepted',
+    } as never);
+
+    await useStockPoolStore.getState().submitAnalysis({ stockCode: '600519' });
+    expect(useStockPoolStore.getState().pendingAnalysisStockCode).toBe('600519');
+
+    // History now contains the freshly completed report for that stock.
+    useStockPoolStore.setState({ historyItems: [historyItem], selectedReport: null });
+    vi.mocked(historyApi.getDetail).mockResolvedValue(historyReport);
+
+    await useStockPoolStore.getState().reconcileCompletedAnalysis('600519');
+
+    const state = useStockPoolStore.getState();
+    expect(state.selectedReport?.meta.stockCode).toBe('600519');
+    expect(state.pendingAnalysisStockCode).toBeNull();
+  });
+
+  it('does not hijack the view for a completion unrelated to the pending stock', async () => {
+    useStockPoolStore.setState({
+      pendingAnalysisStockCode: '600519',
+      historyItems: [historyItem],
+      selectedReport: null,
+    });
+
+    await useStockPoolStore.getState().reconcileCompletedAnalysis('000001');
+
+    const state = useStockPoolStore.getState();
+    expect(state.selectedReport).toBeNull();
+    expect(state.pendingAnalysisStockCode).toBe('600519');
+    expect(historyApi.getDetail).not.toHaveBeenCalled();
+  });
+
+  it('skips reconnect reconcile while the pending analysis is still running', async () => {
+    useStockPoolStore.setState({
+      pendingAnalysisStockCode: '600519',
+      historyItems: [historyItem],
+      selectedReport: null,
+      activeTasks: [{
+        taskId: 'task-600519',
+        stockCode: '600519',
+        status: 'processing',
+        progress: 40,
+        reportType: 'detailed',
+        createdAt: '2026-03-18T08:00:00Z',
+      } as TaskInfo],
+    });
+
+    await useStockPoolStore.getState().reconcileCompletedAnalysis();
+
+    expect(useStockPoolStore.getState().selectedReport).toBeNull();
+    expect(historyApi.getDetail).not.toHaveBeenCalled();
+  });
 });

@@ -923,7 +923,7 @@ const HomePage: React.FC = () => {
                 <ApiErrorAlert
                   error={marketReviewError}
                   className="mb-1"
-                  onDismiss={() => setMarketReviewError(null)}
+                  onDismiss={() => setMarketReviewLive({ error: null })}
                 />
               </div>
             ) : null}

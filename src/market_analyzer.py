@@ -144,6 +144,9 @@ class MarketAnalyzer:
         self.intelligence_service = intelligence_service or self._default_intelligence_service()
         self.profile: MarketProfile = get_profile(self.region)
         self.strategy = get_market_strategy_blueprint(self.region)
+        # Optional recent-average turnover used to describe today's liquidity relative to a
+        # baseline. Left unset by default; the orchestrator may populate it from history.
+        self.turnover_baseline: Optional[float] = None
 
     def _log_context(self) -> str:
         return f"component=market_review region={self.region}"
@@ -1061,7 +1064,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             "|------|------|------|",
             f"| 上涨/下跌/平盘 | {overview.up_count} / {overview.down_count} / {overview.flat_count} | 上涨占比(不含平盘) {up_ratio:.1%} |",
             f"| 涨停/跌停 | {overview.limit_up_count} / {overview.limit_down_count} | 涨跌停差 {limit_spread:+d} |",
-            f"| 两市成交额 | {overview.total_amount:.0f} 亿 | {self._describe_turnover(overview.total_amount)} |",
+            f"| 两市成交额 | {overview.total_amount:.0f} 亿 | {self._describe_turnover(overview.total_amount, getattr(self, 'turnover_baseline', None))} |",
         ]
         return "\n".join(lines)
 
@@ -1228,7 +1231,105 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 lines.append(
                     f"| {rank} | {sector.get('name', '-')} | {self._format_signed_pct(sector.get('change_pct'))} |"
                 )
+        mainline = self._summarize_sector_mainline(overview)
+        if mainline:
+            if lines:
+                lines.append("")
+            lines.append(mainline)
         return "\n".join(lines)
+
+    def _summarize_sector_mainline(self, overview: MarketOverview) -> str:
+        """Synthesize a one-line read on whether leaders form a mainline and whether the
+        decline is broadening — derived from rank magnitudes only, no fabricated catalysts."""
+        def _pct(sector: Dict[str, Any]) -> float:
+            try:
+                return float(sector.get("change_pct"))
+            except (TypeError, ValueError):
+                return 0.0
+
+        top = list(overview.top_sectors[:5] or [])
+        bottom = list(overview.bottom_sectors[:5] or [])
+        if not top and not bottom:
+            return ""
+        english = self._get_review_language() == "en"
+        strong_leaders = sum(1 for s in top if _pct(s) >= 2.0)
+        weak_laggards = sum(1 for s in bottom if _pct(s) <= -2.0)
+        lead_name = top[0].get("name", "-") if top else None
+        lag_name = bottom[0].get("name", "-") if bottom else None
+
+        if english:
+            if lead_name and strong_leaders >= 3:
+                lead = f"Leadership is broad with **{lead_name}** out front — a fairly clear mainline."
+            elif lead_name and strong_leaders >= 1:
+                lead = f"**{lead_name}** leads, but follow-through is limited — mainline durability unconfirmed."
+            elif lead_name:
+                lead = f"Gains are mild and scattered (**{lead_name}** on top) — no clear mainline yet."
+            else:
+                lead = "No advancing sectors to anchor a mainline."
+            if lag_name and weak_laggards >= 3:
+                lag = f" Weakness is broadening (**{lag_name}** and peers down sharply) — stay defensive."
+            elif lag_name:
+                lag = f" **{lag_name}** lags but the drawdown is contained."
+            else:
+                lag = ""
+            return f"- **Mainline read**: {lead}{lag}"
+
+        if lead_name and strong_leaders >= 3:
+            lead = f"领涨由「{lead_name}」领衔，多板块同步走强，主线较清晰"
+        elif lead_name and strong_leaders >= 1:
+            lead = f"领涨由「{lead_name}」领衔，但跟随板块涨幅有限，主线持续性待验证"
+        elif lead_name:
+            lead = f"涨幅温和分散（「{lead_name}」居前），暂无明确主线"
+        else:
+            lead = "暂无上涨板块支撑主线"
+        if lag_name and weak_laggards >= 3:
+            lag = f"；「{lag_name}」等领跌且跌势偏扩散，注意防守"
+        elif lag_name:
+            lag = f"；「{lag_name}」领跌但跌幅可控"
+        else:
+            lag = ""
+        return f"- **主线研判**：{lead}{lag}。"
+
+    def _build_action_stance(self, overview: MarketOverview, review_language: str | None = None) -> str:
+        """Build a stance bullet driven by today's composite signal, reusing the localized
+        snapshot guidance so the strategy line is data-driven rather than boilerplate."""
+        review_language = review_language or self._get_review_language()
+        light = self.build_market_light_snapshot(overview)
+        score = int(light.get("score", 50))
+        guidance = str(light.get("guidance", "")).strip()
+        if review_language == "en":
+            if score >= 60:
+                posture, position = "Offensive", "6/10+"
+            elif score >= 40:
+                posture, position = "Balanced", "3–6/10"
+            else:
+                posture, position = "Defensive", "≤3/10"
+            stance = f"**Today's stance**: {posture} (suggested position {position})"
+            return f"{stance} — {guidance}" if guidance else stance
+        if score >= 60:
+            posture, position = "进攻", "六成以上"
+        elif score >= 40:
+            posture, position = "均衡", "三到六成"
+        else:
+            posture, position = "防守", "三成以下"
+        stance = f"**今日定调**：{posture}（建议仓位{position}）"
+        return f"{stance}——{guidance}" if guidance else stance
+
+    def _build_risk_focus(self, overview: MarketOverview, review_language: str | None = None) -> str:
+        """Build a stance-aware risk bullet so the risk section reflects today's regime."""
+        review_language = review_language or self._get_review_language()
+        score = int(self.build_market_light_snapshot(overview).get("score", 50))
+        if review_language == "en":
+            if score >= 60:
+                return "Sentiment is constructive, but watch for high-flyers stalling on heavy volume and crowded leadership."
+            if score >= 40:
+                return "Signals are mixed; avoid chasing strength or over-concentrating in a single theme."
+            return "Breadth is weak; beware failed rebounds and laggard catch-down, and keep exposure light."
+        if score >= 60:
+            return "情绪偏暖，但需防范高位股放量滞涨与主线拥挤后的分歧。"
+        if score >= 40:
+            return "信号分化，避免追高与重仓押注单一题材，等待量价确认。"
+        return "盘面偏弱，警惕反弹乏力与个股补跌，控制仓位优先。"
 
     def _build_news_block(self, news: List) -> str:
         """Build a compact source-aware news catalyst list for the rendered report."""
@@ -1303,14 +1404,24 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         return value.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
     @staticmethod
-    def _describe_turnover(total_amount: float) -> str:
+    def _describe_turnover(total_amount: float, baseline: Optional[float] = None) -> str:
+        """Describe turnover. Prefer a baseline-relative read (放量/缩量) when a recent
+        average is available; otherwise fall back to an explicitly absolute-caliber level
+        instead of implying an unstated benchmark."""
+        if total_amount <= 0:
+            return "暂无数据"
+        if baseline and baseline > 0:
+            ratio = total_amount / baseline
+            if ratio >= 1.15:
+                return f"放量（较近期均量 +{(ratio - 1) * 100:.0f}%）"
+            if ratio <= 0.85:
+                return f"缩量（较近期均量 -{(1 - ratio) * 100:.0f}%）"
+            return f"与近期持平（均量比 {ratio:.2f}）"
         if total_amount >= 15000:
-            return "高活跃度"
+            return "成交活跃（绝对口径）"
         if total_amount >= 9000:
-            return "中等活跃"
-        if total_amount > 0:
-            return "缩量观望"
-        return "暂无数据"
+            return "成交温和（绝对口径）"
+        return "成交清淡（绝对口径）"
 
     def _build_market_light_scores(self, overview: MarketOverview) -> Dict[str, Any]:
         """Build the canonical Market Light scores used by reports and alerts."""
@@ -1505,13 +1616,13 @@ Lagging: {bottom_sectors_text if bottom_sectors_text else "N/A"}"""
 ## {report_title}
 
 ### 1. Market Summary
-(2-3 sentences summarizing overall market tone, index moves, and liquidity.)
+(2-3 sentences summarizing overall market tone, index moves, and liquidity. If index direction diverges from advance/decline breadth, call out the divergence explicitly and let breadth drive the verdict.)
 
 ### 2. Index Commentary
 ({self._get_index_hint()})
 
 ### 3. Fund Flows
-(Interpret turnover, participation, and the A-share capital evidence above when available.)
+(Interpret turnover, participation, and the A-share capital evidence above when available; state explicitly whether turnover expanded or contracted versus the recent norm.)
 
 ### 4. Sector Highlights
 (Analyze the drivers behind the leading and lagging sectors or themes.)
@@ -1574,7 +1685,7 @@ Output the report content directly, no extra commentary.
 > 一句话给出今日市场状态、核心矛盾和明日优先观察方向。
 
 ### 一、盘面总览
-（2-3句话概括指数、涨跌家数、成交额和情绪温度，明确“强势/偏暖/震荡/偏弱”判断）
+（2-3句话概括指数、涨跌家数、成交额和情绪温度，明确“强势/偏暖/震荡/偏弱”判断；若指数涨跌方向与涨跌家数广度背离，必须点明背离并以广度为主定调，不要仅凭单一指数下结论）
 
 ### 二、指数结构
 （{self._get_index_hint()}，说明谁在护盘、谁在拖累，以及关键支撑/压力）
@@ -1583,7 +1694,7 @@ Output the report content directly, no extra commentary.
 （分析领涨/领跌板块背后的逻辑、持续性和是否形成主线）
 
 ### 四、资金与情绪
-（解读成交额、涨跌停结构、市场宽度、风险偏好；如存在 A 股资金情报证据，必须解释同一份证据，不得编造未给出的金额或排名）
+（解读成交额、涨跌停结构、市场宽度、风险偏好，并明确成交额属放量/缩量/持平；如存在 A 股资金情报证据，必须解释同一份证据，不得编造未给出的金额或排名）
 
 ### 五、消息催化
 （结合近三日新闻，提炼真正影响明日交易的催化或扰动）
@@ -1668,6 +1779,10 @@ Output the report content directly, no extra commentary.
         # 避免「单一指数定调」与下方盘面信号/广度数据自相矛盾。
         mood_key, divergence_note = self._resolve_market_mood(overview, template_language)
         market_mood = self._get_market_mood_text(mood_key, template_language)
+        # 策略与风险随当日盘面信号动态生成，避免每日套话。
+        action_stance = self._build_action_stance(overview, template_language)
+        risk_focus = self._build_risk_focus(overview, template_language)
+        strategy_block = self._get_strategy_markdown_block(template_language).rstrip()
 
         # 指数行情（简洁格式）
         indices_text = ""
@@ -1712,9 +1827,11 @@ Today's {self._get_market_scope_name(template_language)} showed **{market_mood}*
 {stats_section}
 {sector_section}
 ### 5. Risk Alerts
-Market conditions can change quickly. The data above is for reference only and does not constitute investment advice.
+- {risk_focus}
+- Market conditions can change quickly. The data above is for reference only and does not constitute investment advice.
 
-{self._get_strategy_markdown_block(template_language)}
+{strategy_block}
+- {action_stance}
 
 ---
 *Data date: {overview.date} | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*
@@ -1745,9 +1862,11 @@ Market conditions can change quickly. The data above is for reference only and d
 ### 五、消息催化
 - 暂无可用新闻时，应降低对题材持续性的确定性判断。
 
-{self._get_strategy_markdown_block(template_language)}
+{strategy_block}
+- {action_stance}
 
 ### 七、风险提示
+- {risk_focus}
 - 市场有风险，投资需谨慎。以上数据仅供参考，不构成投资建议。
 
 ---

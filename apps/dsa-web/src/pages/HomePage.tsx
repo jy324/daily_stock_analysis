@@ -7,7 +7,7 @@ import { analysisApi } from '../api/analysis';
 import { historyApi } from '../api/history';
 import { agentApi, type SkillInfo } from '../api/agent';
 import { systemConfigApi } from '../api/systemConfig';
-import { ApiErrorAlert, Button, Drawer, EmptyState, InlineAlert } from '../components/common';
+import { ApiErrorAlert, Button, Drawer, EmptyState, InlineAlert, OverflowMenu } from '../components/common';
 import { DashboardStateBlock } from '../components/dashboard';
 import { StockAutocomplete } from '../components/StockAutocomplete';
 import { StockHistoryTrendDrawer, StockBar } from '../components/history';
@@ -747,7 +747,7 @@ const HomePage: React.FC = () => {
                 />
               </div>
               {analysisSkills.length > 0 ? (
-                <div ref={strategyMenuRef} className="relative flex-shrink-0">
+                <div ref={strategyMenuRef} className="relative hidden flex-shrink-0 sm:block">
                   <button
                     ref={strategyButtonRef}
                     id="strategy-menu-button"
@@ -800,7 +800,49 @@ const HomePage: React.FC = () => {
               ) : null}
             </div>
             <div className="flex min-w-0 flex-shrink-0 items-center gap-2.5">
-              <label className="flex h-10 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-subtle bg-surface/60 px-3 text-xs text-secondary-text select-none transition-colors hover:border-subtle-hover hover:text-foreground">
+              {/* Mobile: collapse strategy + notify into an overflow menu */}
+              <div className="sm:hidden">
+                <OverflowMenu label={t('home.moreActions')} align="left">
+                  {(close) => (
+                    <>
+                      <label className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover">
+                        <input
+                          type="checkbox"
+                          checked={notify}
+                          onChange={(e) => setNotify(e.target.checked)}
+                          className="h-3.5 w-3.5 rounded border-border accent-primary"
+                        />
+                        {t('home.notify')}
+                      </label>
+                      {analysisSkills.length > 0 ? (
+                        <>
+                          <div className="my-1 border-t border-subtle" />
+                          {strategyOptions.map((option) => {
+                            const selected = selectedStrategyId === option.id;
+                            return (
+                              <button
+                                key={option.id || 'default'}
+                                type="button"
+                                role="menuitemradio"
+                                aria-checked={selected}
+                                onClick={() => { selectStrategy(option.id); close(); }}
+                                className="flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover"
+                              >
+                                <Check className={`mt-0.5 h-4 w-4 flex-shrink-0 ${selected ? 'opacity-100' : 'opacity-0'}`} aria-hidden="true" />
+                                <span className="min-w-0">
+                                  <span className="block font-medium">{option.name}</span>
+                                  <span className="mt-0.5 line-clamp-2 block text-xs leading-5 text-muted-text">{option.description}</span>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </>
+                      ) : null}
+                    </>
+                  )}
+                </OverflowMenu>
+              </div>
+              <label className="hidden h-10 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-subtle bg-surface/60 px-3 text-xs text-secondary-text select-none transition-colors hover:border-subtle-hover hover:text-foreground sm:flex">
                 <input
                   type="checkbox"
                   checked={notify}
@@ -951,60 +993,122 @@ const HomePage: React.FC = () => {
             ) : !marketReviewReport && selectedReport ? (
               <div className={isHistoryTrendOpen ? 'max-w-6xl space-y-4 pb-8' : 'max-w-4xl space-y-4 pb-8'}>
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  {!isMarketReviewHistoryReport ? (
-                    <>
+                  {/* Desktop: secondary actions inline */}
+                  <div className="hidden items-center gap-2 sm:flex">
+                    {!isMarketReviewHistoryReport ? (
+                      <>
+                        <Button
+                          variant="home-action-ai"
+                          size="sm"
+                          disabled={isAnalyzing || selectedReport.meta.id === undefined}
+                          onClick={handleReanalyze}
+                        >
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                          {t('home.reanalyze')}
+                        </Button>
+                        <Button
+                          variant="home-action-ai"
+                          size="sm"
+                          disabled={selectedReport.meta.id === undefined}
+                          onClick={handleAskFollowUp}
+                        >
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                          </svg>
+                          {t('home.askAi')}
+                        </Button>
+                      </>
+                    ) : (
                       <Button
                         variant="home-action-ai"
                         size="sm"
-                        disabled={isAnalyzing || selectedReport.meta.id === undefined}
-                        onClick={handleReanalyze}
+                        disabled={isSubmittingMarketReview}
+                        isLoading={isSubmittingMarketReview}
+                        loadingText={t('home.submitMarketReview')}
+                        onClick={() => void handleTriggerMarketReview()}
                       >
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                        {t('home.reanalyze')}
+                        <BarChart3 className="h-4 w-4" />
+                        {t('home.rerunMarketReview')}
                       </Button>
-                      <Button
-                        variant="home-action-ai"
-                        size="sm"
-                        disabled={selectedReport.meta.id === undefined}
-                        onClick={handleAskFollowUp}
-                      >
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                        </svg>
-                        {t('home.askAi')}
-                      </Button>
-                    </>
-                  ) : (
+                    )}
                     <Button
                       variant="home-action-ai"
                       size="sm"
-                      disabled={isSubmittingMarketReview}
-                      isLoading={isSubmittingMarketReview}
-                      loadingText={t('home.submitMarketReview')}
-                      onClick={() => void handleTriggerMarketReview()}
+                      disabled={selectedReport.meta.id === undefined || isHistoryTrendUnavailable}
+                      className={isHistoryTrendOpen ? 'border-primary/70 bg-primary/15 text-primary shadow-glow-cyan' : undefined}
+                      onClick={() => {
+                        if (isHistoryTrendOpen) {
+                          closeHistoryTrend();
+                          return;
+                        }
+                        void openHistoryTrend();
+                      }}
                     >
                       <BarChart3 className="h-4 w-4" />
-                      {t('home.rerunMarketReview')}
+                      {t('home.historyTrend')}
                     </Button>
-                  )}
-                  <Button
-                    variant="home-action-ai"
-                    size="sm"
-                    disabled={selectedReport.meta.id === undefined || isHistoryTrendUnavailable}
-                    className={isHistoryTrendOpen ? 'border-primary/70 bg-primary/15 text-primary shadow-glow-cyan' : undefined}
-                    onClick={() => {
-                      if (isHistoryTrendOpen) {
-                        closeHistoryTrend();
-                        return;
-                      }
-                      void openHistoryTrend();
-                    }}
-                  >
-                    <BarChart3 className="h-4 w-4" />
-                    {t('home.historyTrend')}
-                  </Button>
+                  </div>
+
+                  {/* Mobile: secondary actions collapse into an overflow menu */}
+                  <div className="sm:hidden">
+                    <OverflowMenu label={t('home.moreActions')}>
+                      {(close) => (
+                        <>
+                          {!isMarketReviewHistoryReport ? (
+                            <>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={isAnalyzing || selectedReport.meta.id === undefined}
+                                onClick={() => { handleReanalyze(); close(); }}
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {t('home.reanalyze')}
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={selectedReport.meta.id === undefined}
+                                onClick={() => { handleAskFollowUp(); close(); }}
+                                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {t('home.askAi')}
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={isSubmittingMarketReview}
+                              onClick={() => { void handleTriggerMarketReview(); close(); }}
+                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {t('home.rerunMarketReview')}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={selectedReport.meta.id === undefined || isHistoryTrendUnavailable}
+                            onClick={() => {
+                              if (isHistoryTrendOpen) {
+                                closeHistoryTrend();
+                              } else {
+                                void openHistoryTrend();
+                              }
+                              close();
+                            }}
+                            className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {t('home.historyTrend')}
+                          </button>
+                        </>
+                      )}
+                    </OverflowMenu>
+                  </div>
+
                   <Button
                     variant="home-action-report"
                     size="sm"

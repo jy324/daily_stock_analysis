@@ -1616,6 +1616,146 @@ Sector text.
         assert "正文一" in out and "正文二" in out
         assert "正文二 结束" in out
 
+    # -- PR B: narrative rigor (⑤ turnover baseline / ⑥ sector mainline / ⑧ stance / prompt) --
+
+    def test_describe_turnover_uses_baseline_when_available(self):
+        """⑤ With a recent-average baseline, turnover reads as 放量/缩量/持平 relative to it."""
+        from src.market_analyzer import MarketAnalyzer
+
+        assert "放量" in MarketAnalyzer._describe_turnover(13000.0, 10000.0)
+        assert "缩量" in MarketAnalyzer._describe_turnover(8000.0, 10000.0)
+        assert "持平" in MarketAnalyzer._describe_turnover(10200.0, 10000.0)
+
+    def test_describe_turnover_falls_back_to_absolute_caliber_without_baseline(self):
+        """⑤ Without a baseline, label is explicitly absolute-caliber, not a fake benchmark."""
+        from src.market_analyzer import MarketAnalyzer
+
+        assert MarketAnalyzer._describe_turnover(16000.0) == "成交活跃（绝对口径）"
+        assert MarketAnalyzer._describe_turnover(9500.0) == "成交温和（绝对口径）"
+        assert MarketAnalyzer._describe_turnover(5000.0) == "成交清淡（绝对口径）"
+        assert MarketAnalyzer._describe_turnover(0.0) == "暂无数据"
+
+    def test_stats_block_describes_volume_relative_to_instance_baseline(self):
+        """⑤ `_build_stats_block` honors the analyzer's turnover_baseline when set."""
+        from src.market_analyzer import MarketOverview, MarketIndex
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        ma.turnover_baseline = 8000.0
+        overview = MarketOverview(
+            date="2026-03-05",
+            indices=[MarketIndex(code="000001", name="上证指数", current=3300.0, change_pct=0.4)],
+            up_count=3000,
+            down_count=1800,
+            total_amount=12000.0,
+        )
+
+        result = ma._build_stats_block(overview)
+
+        assert "放量" in result
+
+    def test_sector_block_appends_concentrated_mainline_read(self):
+        """⑥ Strong, broad leadership yields a '主线较清晰' synthesis line."""
+        from src.market_analyzer import MarketOverview
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        overview = MarketOverview(
+            date="2026-03-05",
+            top_sectors=[
+                {"name": "半导体", "change_pct": 4.1},
+                {"name": "AI算力", "change_pct": 3.2},
+                {"name": "消费电子", "change_pct": 2.5},
+            ],
+            bottom_sectors=[{"name": "银行", "change_pct": -0.3}],
+        )
+
+        result = ma._build_sector_block(overview)
+
+        assert "主线研判" in result
+        assert "主线较清晰" in result
+
+    def test_sector_block_flags_scattered_gains_and_broad_decline(self):
+        """⑥ Mild scattered gains read as no mainline; broad decline flags defense."""
+        from src.market_analyzer import MarketOverview
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        overview = MarketOverview(
+            date="2026-03-05",
+            top_sectors=[
+                {"name": "煤炭", "change_pct": 0.8},
+                {"name": "电力", "change_pct": 0.5},
+            ],
+            bottom_sectors=[
+                {"name": "地产", "change_pct": -2.5},
+                {"name": "券商", "change_pct": -2.2},
+                {"name": "保险", "change_pct": -2.1},
+            ],
+        )
+
+        result = ma._build_sector_block(overview)
+
+        assert "暂无明确主线" in result
+        assert "注意防守" in result
+
+    def test_template_review_emits_offensive_stance_when_signal_strong(self):
+        """⑧ Strong composite signal drives an offensive stance bullet (not boilerplate)."""
+        from src.market_analyzer import MarketOverview, MarketIndex
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        overview = MarketOverview(
+            date="2026-03-05",
+            indices=[
+                MarketIndex(code="000001", name="上证指数", current=3360.0, change=66.0, change_pct=2.0),
+            ],
+            up_count=4500,
+            down_count=500,
+            flat_count=80,
+            limit_up_count=120,
+            limit_down_count=2,
+            total_amount=16000.0,
+        )
+
+        result = ma.generate_market_review(overview, [])
+
+        assert "今日定调" in result
+        assert "进攻" in result
+
+    def test_template_review_emits_defensive_stance_when_signal_weak(self):
+        """⑧ Weak composite signal drives a defensive stance and risk focus."""
+        from src.market_analyzer import MarketOverview, MarketIndex
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        overview = MarketOverview(
+            date="2026-03-05",
+            indices=[
+                MarketIndex(code="000001", name="上证指数", current=3200.0, change=-64.0, change_pct=-2.0),
+            ],
+            up_count=300,
+            down_count=4700,
+            flat_count=50,
+            limit_up_count=2,
+            limit_down_count=120,
+            total_amount=8000.0,
+        )
+
+        result = ma.generate_market_review(overview, [])
+
+        assert "今日定调" in result
+        assert "防守" in result
+
+    def test_review_prompt_instructs_breadth_divergence_handling(self):
+        """Prompt requires reconciling index vs breadth divergence (zh & en)."""
+        from src.market_analyzer import MarketOverview
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value="review")
+        prompt_zh = ma._build_review_prompt(MarketOverview(date="2026-05-06"), [])
+        assert "背离" in prompt_zh
+        assert "以广度为主定调" in prompt_zh
+
+        ma.config.report_language = "en"
+        prompt_en = ma._build_review_prompt(MarketOverview(date="2026-05-06"), [])
+        assert "divergence" in prompt_en.lower()
+        assert "breadth drive the verdict" in prompt_en
+
     def test_no_private_attribute_access_in_market_analyzer_source(self):
         """Static guard: market_analyzer.py must not access private analyzer attrs."""
         import ast

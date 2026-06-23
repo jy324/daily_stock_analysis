@@ -1070,7 +1070,7 @@ Sector text.
         assert "- **Market Signal**: 66/100 (constructive, risk-on)" in result
         assert "- **Breadth**: Advancers 3200 / Decliners 1800 / Flat 100;" in result
         assert "Turnover 14567 (CNY 100m)" in result
-        assert "| Index | Last | Change % | Open | High | Low | Amplitude | Turnover (CNY 100m) |" in result
+        assert "| Index | Last | Change % | Open | High | Low | Amplitude | Index Turnover (CNY 100m) |" in result
         assert "#### Leading Sectors" in result
         assert "| 1 | AI算力 | +3.25% |" in result
         assert "#### Lagging Sectors" in result
@@ -1139,7 +1139,7 @@ Sector text.
         assert "操作建议" in result
         assert "盘面温度" not in result
         assert "| 上涨/下跌/平盘 | 3200 / 1800 / 100 |" in result
-        assert "| 指数 | 最新 | 涨跌幅 | 开盘 | 最高 | 最低 | 振幅 | 成交额(亿) |" in result
+        assert "| 指数 | 最新 | 涨跌幅 | 开盘 | 最高 | 最低 | 振幅 | 成交额(亿·成份) |" in result
         assert "| 上证指数 | 3300.00 | 🟢 +0.36% | 3288.00 | 3312.00 | 3276.00 | 1.10% | 1450 |" in result
         assert "#### 领涨板块 Top 5" in result
         assert "| 1 | AI算力 | +3.25% |" in result
@@ -1488,6 +1488,133 @@ Sector text.
 
         assert "| 上证指数 | 3200.00 | 🟢 +0.68% |" in result
         assert "| 深证成指 | 9800.00 | 🔴 -0.42% |" in result
+
+    # -- PR A: deterministic rigor fixes (④ verdict layering / ② amplitude / ⑨ time / ① \n) --
+
+    def test_template_review_verdict_follows_breadth_not_single_index(self):
+        """④ A green headline index but broadly negative breadth must not read as '上涨';
+        the composite signal drives the verdict and a divergence note is appended."""
+        from src.market_analyzer import MarketOverview, MarketIndex
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        overview = MarketOverview(
+            date="2026-03-05",
+            indices=[
+                MarketIndex(code="000001", name="上证指数", current=3300.0, change=4.0, change_pct=0.15),
+            ],
+            up_count=1000,
+            down_count=4000,
+            flat_count=100,
+            limit_up_count=5,
+            limit_down_count=60,
+            total_amount=9000.0,
+        )
+
+        result = ma.generate_market_review(overview, [])
+
+        assert "**小幅下跌**" in result
+        assert "**小幅上涨**" not in result
+        assert "指数收红但下跌家数居多" in result
+
+    def test_template_review_marks_broad_decline_without_false_divergence(self):
+        """④ When index and breadth agree (broad decline), verdict is 明显下跌 and no divergence note."""
+        from src.market_analyzer import MarketOverview, MarketIndex
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        overview = MarketOverview(
+            date="2026-03-05",
+            indices=[
+                MarketIndex(code="000001", name="上证指数", current=3200.0, change=-64.0, change_pct=-2.0),
+                MarketIndex(code="399001", name="深证成指", current=9600.0, change=-216.0, change_pct=-2.2),
+            ],
+            up_count=300,
+            down_count=4700,
+            flat_count=50,
+            limit_up_count=2,
+            limit_down_count=120,
+            total_amount=11000.0,
+        )
+
+        result = ma.generate_market_review(overview, [])
+
+        assert "**明显下跌**" in result
+        assert "指数收红但下跌家数居多" not in result
+        assert "指数收绿但上涨家数居多" not in result
+
+    def test_resolve_amplitude_derives_from_high_low_when_api_missing(self):
+        """② Amplitude falls back to (high-low)/prev_close when the API omits 振幅."""
+        from src.market_analyzer import MarketAnalyzer, MarketIndex
+
+        derived = MarketIndex(
+            code="000001", name="上证指数", current=3300.0, change_pct=0.5,
+            high=3320.0, low=3280.0, prev_close=3284.0, amplitude=0.0,
+        )
+        expected = (3320.0 - 3280.0) / 3284.0 * 100
+        assert MarketAnalyzer._resolve_amplitude(derived) == pytest.approx(expected)
+
+        explicit = MarketIndex(
+            code="000001", name="上证指数", current=3300.0, amplitude=1.25,
+            high=3320.0, low=3280.0, prev_close=3284.0,
+        )
+        assert MarketAnalyzer._resolve_amplitude(explicit) == 1.25
+
+        no_base = MarketIndex(
+            code="000001", name="上证指数", current=3300.0, amplitude=0.0,
+            high=3320.0, low=3280.0, prev_close=0.0,
+        )
+        assert MarketAnalyzer._resolve_amplitude(no_base) == 0.0
+
+    def test_indices_block_renders_derived_amplitude_instead_of_na(self):
+        """② Indices table shows the derived amplitude rather than N/A when 振幅 is missing."""
+        from src.market_analyzer import MarketOverview, MarketIndex
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        overview = MarketOverview(
+            date="2026-03-05",
+            indices=[
+                MarketIndex(
+                    code="000001", name="上证指数", current=3300.0, change_pct=0.36,
+                    open=3288.0, high=3320.0, low=3280.0, prev_close=3284.0,
+                    amount=145000000000.0, amplitude=0.0,
+                )
+            ],
+        )
+
+        result = ma._build_indices_block(overview)
+
+        assert "成交额(亿·成份)" in result
+        assert "1.22%" in result
+        amplitude_cell = result.splitlines()[-1].split("|")[7].strip()
+        assert amplitude_cell != "N/A"
+
+    def test_template_review_labels_data_date_and_generation_time(self):
+        """⑨ Footer distinguishes the close-of-data date from the report generation timestamp."""
+        from src.market_analyzer import MarketOverview, MarketIndex
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        overview = MarketOverview(
+            date="2026-03-05",
+            indices=[MarketIndex(code="000001", name="上证指数", current=3300.0, change_pct=0.15)],
+        )
+
+        result = ma.generate_market_review(overview, [])
+
+        assert "数据日期: 2026-03-05" in result
+        assert "报告生成:" in result
+        assert "复盘时间:" not in result
+
+    def test_normalize_review_markdown_unescapes_literal_newlines_and_collapses_blanks(self):
+        """① Literal escape sequences become real whitespace; 3+ blank lines collapse to one."""
+        from src.market_analyzer import MarketAnalyzer
+
+        raw = "# 标题\\n\\n正文一\\n\\n\\n\\n正文二\\t结束"
+        out = MarketAnalyzer._normalize_review_markdown(raw)
+
+        assert "\\n" not in out
+        assert "\\t" not in out
+        assert "\n\n\n" not in out
+        assert "正文一" in out and "正文二" in out
+        assert "正文二 结束" in out
 
     def test_no_private_attribute_access_in_market_analyzer_source(self):
         """Static guard: market_analyzer.py must not access private analyzer attrs."""

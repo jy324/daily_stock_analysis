@@ -338,6 +338,94 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             }
         return mapping[mood_key]
 
+    def _resolve_market_mood(
+        self, overview: MarketOverview, review_language: str | None = None
+    ) -> tuple[str, str]:
+        """Resolve the headline mood from the composite market-light signal.
+
+        Returns (mood_key, divergence_note). The mood is driven by the same
+        breadth+index+limit composite score used by `_build_stats_block`, so the
+        headline no longer contradicts the breadth table. When the index
+        direction and the advance/decline breadth disagree, a short note is
+        returned so the conclusion explicitly flags the divergence.
+        """
+        review_language = review_language or self._get_review_language()
+        index_changes = [idx.change_pct for idx in overview.indices if idx.change_pct is not None]
+        avg_index = sum(index_changes) / len(index_changes) if index_changes else 0.0
+        participants = overview.up_count + overview.down_count
+        up_ratio = overview.up_count / participants if participants else None
+        # The composite signal blends breadth+limit+index; it is only meaningful when
+        # advance/decline statistics exist (A-share). For index-only markets (US/HK)
+        # the headline should still track index direction, so fall back to that.
+        breadth_meaningful = bool(self.profile.has_market_stats and participants > 0)
+
+        if breadth_meaningful:
+            score = int(self._build_market_light_scores(overview)["score"])
+            if score >= 70:
+                mood_key = "strong_up"
+            elif score >= 55:
+                mood_key = "mild_up"
+            elif score >= 40:
+                mood_key = "range"
+            elif score >= 25:
+                mood_key = "mild_down"
+            else:
+                mood_key = "strong_down"
+        elif index_changes:
+            if avg_index > 1:
+                mood_key = "strong_up"
+            elif avg_index > 0:
+                mood_key = "mild_up"
+            elif avg_index > -1:
+                mood_key = "mild_down"
+            else:
+                mood_key = "strong_down"
+        else:
+            mood_key = "range"
+
+        note = ""
+        if breadth_meaningful and up_ratio is not None:
+            if avg_index > 0.1 and up_ratio < 0.45:
+                note = (
+                    "Indices closed higher while decliners outnumbered advancers — "
+                    "a weight-driven advance with weak breadth."
+                    if review_language == "en"
+                    else "指数收红但下跌家数居多，属权重护盘、个股普跌，宜以广度定调。"
+                )
+            elif avg_index < -0.1 and up_ratio > 0.55:
+                note = (
+                    "Indices closed lower while advancers outnumbered decliners — "
+                    "heavyweight drag amid broad participation."
+                    if review_language == "en"
+                    else "指数收绿但上涨家数居多，权重拖累指数、个股结构性占优。"
+                )
+        return mood_key, note
+
+    @staticmethod
+    def _resolve_amplitude(idx: "MarketIndex") -> float:
+        """Return index amplitude %, deriving from high/low/prev_close when the API omits it."""
+        if idx.amplitude and idx.amplitude > 0:
+            return idx.amplitude
+        if idx.prev_close and idx.prev_close > 0 and idx.high and idx.low and idx.high >= idx.low:
+            return (idx.high - idx.low) / idx.prev_close * 100
+        return 0.0
+
+    @staticmethod
+    def _normalize_review_markdown(text: str) -> str:
+        """Normalize generated review markdown for consistent downstream rendering.
+
+        - Converts literal escape sequences (``\\n``/``\\r\\n``/``\\t``) that occasionally
+          leak from upstream model output or serialization into real whitespace.
+        - Collapses 3+ consecutive blank lines into a single blank line.
+        """
+        if not text:
+            return text
+        normalized = (
+            text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", " ")
+        )
+        normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+        return normalized.strip("\n")
+
     def get_market_overview(self) -> MarketOverview:
         """
         获取市场概览数据
@@ -560,7 +648,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 "[大盘] %s action=generate_review status=fallback_template reason=no_analyzer",
                 self._log_context(),
             )
-            return self._generate_template_review(overview, news)
+            return self._normalize_review_markdown(self._generate_template_review(overview, news))
 
         # 构建 Prompt
         prompt = self._build_review_prompt(overview, news, ashare_evidence=ashare_evidence)
@@ -576,13 +664,15 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 len(review),
             )
             # Inject structured data tables into LLM prose sections
-            return self._inject_data_into_review(review, overview, news)
+            return self._normalize_review_markdown(
+                self._inject_data_into_review(review, overview, news)
+            )
 
         logger.warning(
             "[大盘] %s action=generate_review status=fallback_template reason=empty_llm_response",
             self._log_context(),
         )
-        return self._generate_template_review(overview, news)
+        return self._normalize_review_markdown(self._generate_template_review(overview, news))
 
     def build_market_review_payload(
         self,
@@ -1078,13 +1168,13 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             return ""
         if self._get_review_language() == "en":
             lines = [
-                f"| Index | Last | Change % | Open | High | Low | Amplitude | Turnover ({self._get_turnover_unit_label()}) |",
-                "|-------|------|----------|------|------|-----|-----------|-----------------|",
+                f"| Index | Last | Change % | Open | High | Low | Amplitude | Index Turnover ({self._get_turnover_unit_label()}) |",
+                "|-------|------|----------|------|------|-----|-----------|------------------------|",
             ]
         else:
             lines = [
-                "| 指数 | 最新 | 涨跌幅 | 开盘 | 最高 | 最低 | 振幅 | 成交额(亿) |",
-                "|------|------|--------|------|------|------|------|-----------|",
+                "| 指数 | 最新 | 涨跌幅 | 开盘 | 最高 | 最低 | 振幅 | 成交额(亿·成份) |",
+                "|------|------|--------|------|------|------|------|----------------|",
             ]
         for idx in overview.indices:
             arrow = self._get_index_change_arrow(idx.change_pct)
@@ -1093,7 +1183,7 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             lines.append(
                 f"| {idx.name} | {idx.current:.2f} | {arrow} {idx.change_pct:+.2f}% | "
                 f"{self._format_optional_number(idx.open)} | {self._format_optional_number(idx.high)} | "
-                f"{self._format_optional_number(idx.low)} | {self._format_optional_pct(idx.amplitude)} | {amount_str} |"
+                f"{self._format_optional_number(idx.low)} | {self._format_optional_pct(self._resolve_amplitude(idx))} | {amount_str} |"
             )
         return "\n".join(lines)
 
@@ -1574,30 +1664,11 @@ Output the report content directly, no extra commentary.
     def _generate_template_review(self, overview: MarketOverview, news: List) -> str:
         """使用模板生成复盘报告（无大模型时的备选方案）"""
         template_language = self._get_template_review_language()
-        mood_code = self.profile.mood_index_code
-        # 根据 mood_index_code 查找对应指数
-        # cn: mood_code="000001"，idx.code 可能为 "sh000001"（以 mood_code 结尾）
-        # us: mood_code="SPX"，idx.code 直接为 "SPX"
-        mood_index = next(
-            (
-                idx
-                for idx in overview.indices
-                if idx.code == mood_code or idx.code.endswith(mood_code)
-            ),
-            None,
-        )
-        if mood_index:
-            if mood_index.change_pct > 1:
-                market_mood = self._get_market_mood_text("strong_up", template_language)
-            elif mood_index.change_pct > 0:
-                market_mood = self._get_market_mood_text("mild_up", template_language)
-            elif mood_index.change_pct > -1:
-                market_mood = self._get_market_mood_text("mild_down", template_language)
-            else:
-                market_mood = self._get_market_mood_text("strong_down", template_language)
-        else:
-            market_mood = self._get_market_mood_text("range", template_language)
-        
+        # 标题情绪改用复合「盘面信号」（广度+指数+涨跌停），并在指数方向与广度背离时点明，
+        # 避免「单一指数定调」与下方盘面信号/广度数据自相矛盾。
+        mood_key, divergence_note = self._resolve_market_mood(overview, template_language)
+        market_mood = self._get_market_mood_text(mood_key, template_language)
+
         # 指数行情（简洁格式）
         indices_text = ""
         for idx in overview.indices[:4]:
@@ -1634,7 +1705,7 @@ Output the report content directly, no extra commentary.
             report = f"""## {overview.date} {market_name}
 
 ### 1. Market Summary
-Today's {self._get_market_scope_name(template_language)} showed **{market_mood}**.
+Today's {self._get_market_scope_name(template_language)} showed **{market_mood}**.{(' ' + divergence_note) if divergence_note else ''}
 
 ### 2. Major Indices
 {indices_text or "- No index data available"}
@@ -1646,7 +1717,7 @@ Market conditions can change quickly. The data above is for reference only and d
 {self._get_strategy_markdown_block(template_language)}
 
 ---
-*Review Time: {datetime.now().strftime('%H:%M')}*
+*Data date: {overview.date} | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*
 """
             return report
 
@@ -1657,7 +1728,7 @@ Market conditions can change quickly. The data above is for reference only and d
         sector_block = self._build_sector_block(overview)
         return f"""## {overview.date} 大盘复盘
 
-> 今日{market_label}市场整体呈现**{market_mood}**态势，优先观察指数承接、成交额变化和板块持续性。
+> 今日{market_label}市场整体呈现**{market_mood}**态势，优先观察指数承接、成交额变化和板块持续性。{divergence_note}
 
 ### 一、盘面总览
 {dashboard_block or "暂无市场宽度数据。"}
@@ -1680,7 +1751,7 @@ Market conditions can change quickly. The data above is for reference only and d
 - 市场有风险，投资需谨慎。以上数据仅供参考，不构成投资建议。
 
 ---
-*复盘时间: {datetime.now().strftime('%H:%M')}*
+*数据日期: {overview.date} ｜ 报告生成: {datetime.now().strftime('%Y-%m-%d %H:%M')}*
 """
     
     def _run_daily_review_parts(self) -> MarketLightReviewResult:

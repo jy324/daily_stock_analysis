@@ -18,6 +18,7 @@ from src.services.market_light_service import (
     MARKET_LIGHT_HISTORY_BATCH_SIZE,
     build_current_snapshot,
     load_previous_snapshot,
+    load_recent_turnover_baseline,
 )
 from src.storage import AnalysisHistory, DatabaseManager
 
@@ -77,6 +78,123 @@ class MarketLightServiceTestCase(unittest.TestCase):
                 )
             )
             session.commit()
+
+    @staticmethod
+    def _turnover_ctx(region: str, date: str, total_amount: float) -> dict:
+        return {
+            "report_kind": "market_review",
+            "market_review_region": region,
+            "market_review_payload": {
+                "kind": "market_review",
+                "region": region,
+                "date": date,
+                "breadth": {
+                    "total_amount": total_amount,
+                    "up_count": 100,
+                    "down_count": 100,
+                    "turnover_unit": "亿",
+                },
+            },
+        }
+
+    def test_turnover_baseline_averages_recent_reviews(self) -> None:
+        amounts = [11000.0, 9000.0, 13000.0]
+        for offset, amount in enumerate(amounts):
+            self._add_history(
+                created_at=datetime(2026, 3, 7, 18, 0) - timedelta(days=offset),
+                context_snapshot=self._turnover_ctx("cn", f"2026-03-0{6 - offset}", amount),
+            )
+
+        baseline = load_recent_turnover_baseline(
+            "cn", before_trade_date="2026-03-10", min_samples=2, db_manager=self.db
+        )
+
+        self.assertAlmostEqual(baseline, sum(amounts) / len(amounts))
+
+    def test_turnover_baseline_none_below_min_samples(self) -> None:
+        self._add_history(
+            created_at=datetime(2026, 3, 7, 18, 0),
+            context_snapshot=self._turnover_ctx("cn", "2026-03-06", 11000.0),
+        )
+        self._add_history(
+            created_at=datetime(2026, 3, 6, 18, 0),
+            context_snapshot=self._turnover_ctx("cn", "2026-03-05", 12000.0),
+        )
+
+        baseline = load_recent_turnover_baseline(
+            "cn", before_trade_date="2026-03-10", min_samples=5, db_manager=self.db
+        )
+
+        self.assertIsNone(baseline)
+
+    def test_turnover_baseline_skips_same_day_other_region_and_dedupes(self) -> None:
+        # same-day (>= cutoff) is excluded
+        self._add_history(
+            created_at=datetime(2026, 3, 10, 18, 0),
+            context_snapshot=self._turnover_ctx("cn", "2026-03-10", 99999.0),
+        )
+        # other region excluded for cn
+        self._add_history(
+            created_at=datetime(2026, 3, 9, 18, 0),
+            context_snapshot=self._turnover_ctx("us", "2026-03-09", 88888.0),
+        )
+        # duplicate trade date counted once (latest row wins by created_at desc)
+        self._add_history(
+            created_at=datetime(2026, 3, 8, 19, 0),
+            context_snapshot=self._turnover_ctx("cn", "2026-03-08", 10000.0),
+        )
+        self._add_history(
+            created_at=datetime(2026, 3, 8, 9, 0),
+            context_snapshot=self._turnover_ctx("cn", "2026-03-08", 20000.0),
+        )
+        self._add_history(
+            created_at=datetime(2026, 3, 7, 18, 0),
+            context_snapshot=self._turnover_ctx("cn", "2026-03-07", 12000.0),
+        )
+
+        baseline = load_recent_turnover_baseline(
+            "cn", before_trade_date="2026-03-10", min_samples=1, db_manager=self.db
+        )
+
+        # only 2026-03-08 (10000, latest row) and 2026-03-07 (12000) count
+        self.assertAlmostEqual(baseline, (10000.0 + 12000.0) / 2)
+
+    def test_turnover_baseline_reads_multi_region_markets_payload(self) -> None:
+        ctx = {
+            "report_kind": "market_review",
+            "market_review_region": "both",
+            "market_review_payload": {
+                "kind": "market_review",
+                "region": "both",
+                "markets": {
+                    "cn": {"region": "cn", "date": "2026-03-06", "breadth": {"total_amount": 11000.0}},
+                    "us": {"region": "us", "date": "2026-03-06", "breadth": {"total_amount": 22000.0}},
+                },
+            },
+        }
+        self._add_history(created_at=datetime(2026, 3, 7, 18, 0), context_snapshot=ctx)
+
+        baseline = load_recent_turnover_baseline(
+            "cn", before_trade_date="2026-03-10", min_samples=1, db_manager=self.db
+        )
+
+        self.assertAlmostEqual(baseline, 11000.0)
+
+    def test_turnover_baseline_skips_rows_without_positive_breadth(self) -> None:
+        self._add_history(
+            created_at=datetime(2026, 3, 7, 18, 0),
+            context_snapshot=self._turnover_ctx("cn", "2026-03-06", 0.0),
+        )
+        self._add_history(
+            created_at=datetime(2026, 3, 6, 18, 0),
+            context_snapshot={"market_review_payload": {"region": "cn", "date": "2026-03-05"}},
+        )
+
+        baseline = load_recent_turnover_baseline(
+            "cn", before_trade_date="2026-03-10", min_samples=1, db_manager=self.db
+        )
+
+        self.assertIsNone(baseline)
 
     def test_load_previous_snapshot_skips_same_day_and_legacy_history(self) -> None:
         self._add_history(

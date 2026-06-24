@@ -84,6 +84,25 @@ def _resolve_market_review_regions(raw_region: Optional[str]) -> list[str]:
     return ['cn']
 
 
+def _resolve_turnover_baseline(region: str) -> Optional[float]:
+    """Best-effort recent two-market turnover baseline; never raises into the review flow.
+
+    Lazy-imports the reader to avoid a circular import (`market_light_service` imports the
+    market-review constants). Returns None on any error so the report keeps the absolute
+    turnover description.
+    """
+    try:
+        from src.services.market_light_service import load_recent_turnover_baseline
+
+        return load_recent_turnover_baseline(
+            region,
+            before_trade_date=datetime.now().strftime('%Y-%m-%d'),
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.warning("turnover baseline 加载失败，沿用绝对口径: %s", exc)
+        return None
+
+
 def run_market_review(
     notifier: NotificationService,
     analyzer: Optional[GeminiAnalyzer] = None,
@@ -152,6 +171,7 @@ def run_market_review(
                     region=mkt,
                     config=runtime_config,
                 )
+                mkt_analyzer.turnover_baseline = _resolve_turnover_baseline(mkt)
                 review_result = mkt_analyzer.run_daily_review_with_snapshot()
                 mkt_report = review_result.report
                 market_light_snapshots[mkt] = review_result.market_light_snapshot
@@ -186,6 +206,7 @@ def run_market_review(
                 region=run_region,
                 config=runtime_config,
             )
+            market_analyzer.turnover_baseline = _resolve_turnover_baseline(run_region)
             review_result = market_analyzer.run_daily_review_with_snapshot()
             review_report = review_result.report
             market_light_snapshots = {run_region: review_result.market_light_snapshot}

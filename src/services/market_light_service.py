@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import desc
 
@@ -127,3 +127,113 @@ def _extract_region_snapshot(raw_context_snapshot: Any, region: str) -> Optional
         return None
     snapshot = snapshots.get(region)
     return snapshot if isinstance(snapshot, dict) else None
+
+
+MARKET_TURNOVER_BASELINE_LOOKBACK = 20
+MARKET_TURNOVER_BASELINE_MIN_SAMPLES = 5
+
+
+def load_recent_turnover_baseline(
+    region: str,
+    *,
+    before_trade_date: str,
+    lookback: int = MARKET_TURNOVER_BASELINE_LOOKBACK,
+    min_samples: int = MARKET_TURNOVER_BASELINE_MIN_SAMPLES,
+    db_manager: Optional[DatabaseManager] = None,
+) -> Optional[float]:
+    """Mean two-market turnover (亿) from recent persisted reviews before ``before_trade_date``.
+
+    Reuses the persisted market-review ``context_snapshot.market_review_payload`` (single
+    region or ``markets[region]``) ``breadth.total_amount``. Returns ``None`` when fewer than
+    ``min_samples`` usable trading days are found, so the caller keeps the absolute-caliber
+    turnover description rather than comparing against a thin/empty baseline.
+    """
+    normalized_region = normalize_market_region(region)
+    cutoff = str(before_trade_date or "").strip()
+    if not cutoff:
+        return None
+
+    db = db_manager or DatabaseManager.get_instance()
+    amounts: List[float] = []
+    seen_dates: set[str] = set()
+
+    with db.get_session() as session:
+        query = (
+            session.query(AnalysisHistory)
+            .filter(
+                AnalysisHistory.code == MARKET_REVIEW_HISTORY_CODE,
+                AnalysisHistory.report_type == MARKET_REVIEW_REPORT_TYPE,
+            )
+            .order_by(desc(AnalysisHistory.created_at), desc(AnalysisHistory.id))
+            # Scan a little wider than `lookback` to skip same-day, legacy or
+            # other-region rows without prematurely starving the sample.
+            .limit(max(lookback * 3, lookback))
+        )
+        for row in query.yield_per(MARKET_LIGHT_HISTORY_BATCH_SIZE):
+            parsed = _extract_region_turnover(row.context_snapshot, normalized_region, cutoff)
+            if parsed is None:
+                continue
+            trade_date, amount = parsed
+            if trade_date in seen_dates:
+                continue
+            seen_dates.add(trade_date)
+            amounts.append(amount)
+            if len(amounts) >= lookback:
+                break
+
+    if len(amounts) < max(1, min_samples):
+        return None
+    return sum(amounts) / len(amounts)
+
+
+def _extract_region_turnover(
+    raw_context_snapshot: Any,
+    region: str,
+    cutoff: str,
+) -> Optional[tuple[str, float]]:
+    """Return ``(trade_date, total_amount)`` for ``region`` from a persisted review row.
+
+    Skips rows on/after ``cutoff``, other regions, and rows without positive breadth turnover.
+    """
+    if not raw_context_snapshot:
+        return None
+    try:
+        payload = (
+            json.loads(raw_context_snapshot)
+            if isinstance(raw_context_snapshot, str)
+            else raw_context_snapshot
+        )
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    review_payload = payload.get("market_review_payload")
+    if not isinstance(review_payload, dict):
+        return None
+
+    region_payload: Optional[Dict[str, Any]] = None
+    markets = review_payload.get("markets")
+    if isinstance(markets, dict):
+        candidate = markets.get(region)
+        if isinstance(candidate, dict):
+            region_payload = candidate
+    elif str(review_payload.get("region") or "").strip().lower() == region:
+        region_payload = review_payload
+    if not isinstance(region_payload, dict):
+        return None
+
+    trade_date = str(region_payload.get("date") or "").strip()
+    if not trade_date or trade_date >= cutoff:
+        return None
+
+    breadth = region_payload.get("breadth")
+    if not isinstance(breadth, dict):
+        return None
+    try:
+        amount = float(breadth.get("total_amount"))
+    except (TypeError, ValueError):
+        return None
+    if amount <= 0:
+        return None
+    return trade_date, amount

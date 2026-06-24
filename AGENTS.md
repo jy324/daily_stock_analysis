@@ -218,6 +218,7 @@ gh run view <run_id> --log-failed
   - 修改报告结构、Prompt、提取器、通知模板、机器人链路时，要检查上游输入与下游消费方是否仍兼容。
   - 单一通知渠道失败不应拖垮整个分析主流程，除非需求明确要求 fail-fast。
   - 修改 `src/services/image_stock_extractor.py` 中 `EXTRACT_PROMPT` 时，要在 PR 描述中附完整最新 prompt。
+  - 修改大盘复盘的结论 / 叙事 / 结构 / 字段时，必须同时覆盖**模板兜底路径**（`_generate_template_review`）与 **LLM 路径**（`_build_review_prompt` + `_inject_data_into_review`），并为两条路径补测试，避免兜底输出与 LLM 输出长期漂移。
 
 - 工作流 / 发布 / 打包：
   - 修改自动 tag、Release、Docker 发布、日常分析或桌面端打包流程时，要评估触发条件、产物路径、权限边界和回滚方式。

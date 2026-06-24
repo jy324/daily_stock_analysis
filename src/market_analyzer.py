@@ -651,7 +651,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 "[大盘] %s action=generate_review status=fallback_template reason=no_analyzer",
                 self._log_context(),
             )
-            return self._normalize_review_markdown(self._generate_template_review(overview, news))
+            return self._normalize_review_markdown(
+                self._generate_template_review(overview, news, ashare_evidence=ashare_evidence)
+            )
 
         # 构建 Prompt
         prompt = self._build_review_prompt(overview, news, ashare_evidence=ashare_evidence)
@@ -675,7 +677,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             "[大盘] %s action=generate_review status=fallback_template reason=empty_llm_response",
             self._log_context(),
         )
-        return self._normalize_review_markdown(self._generate_template_review(overview, news))
+        return self._normalize_review_markdown(
+            self._generate_template_review(overview, news, ashare_evidence=ashare_evidence)
+        )
 
     def build_market_review_payload(
         self,
@@ -874,6 +878,26 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 )
             )
         return "\n".join(lines).strip()
+
+    def _build_template_funds_block(self, ashare_evidence: Optional[Dict[str, Any]]) -> str:
+        """Section 四「资金与情绪」body for the template fallback.
+
+        When A-share capital intelligence is enabled and returns sector rows, render
+        the objective fund-flow evidence plus a one-line read; otherwise keep the
+        deterministic boilerplate so a disabled/empty feature changes nothing.
+        """
+        fallback = "- 结合成交额和涨跌家数看，当前更适合等待确认，避免仅凭单一热点追高。"
+        if not isinstance(ashare_evidence, dict):
+            return fallback
+        markdown = str(ashare_evidence.get("markdown") or "").strip()
+        rows = self._ashare_evidence_rows(self._result_value(ashare_evidence.get("result"), "data", None))
+        if not markdown or not rows:
+            return fallback
+        interpretation = (
+            "- 解读：结合上述板块资金流向与成交额、涨跌家数，关注主力净流入方向的持续性，"
+            "避免仅凭单一热点追高。"
+        )
+        return f"{markdown}\n{interpretation}"
 
     @staticmethod
     def _result_value(result: Any, key: str, default: Any = None) -> Any:
@@ -1772,7 +1796,12 @@ Output the report content directly, no extra commentary.
             lines.append("- 未返回可展示的板块资金记录。")
         return "\n".join(lines)
     
-    def _generate_template_review(self, overview: MarketOverview, news: List) -> str:
+    def _generate_template_review(
+        self,
+        overview: MarketOverview,
+        news: List,
+        ashare_evidence: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """使用模板生成复盘报告（无大模型时的备选方案）"""
         template_language = self._get_template_review_language()
         # 标题情绪改用复合「盘面信号」（广度+指数+涨跌停），并在指数方向与广度背离时点明，
@@ -1782,6 +1811,8 @@ Output the report content directly, no extra commentary.
         # 策略与风险随当日盘面信号动态生成，避免每日套话。
         action_stance = self._build_action_stance(overview, template_language)
         risk_focus = self._build_risk_focus(overview, template_language)
+        # 资金与情绪：启用 A 股资金情报且有数据时呈现板块资金流证据，否则维持兜底套话。
+        funds_block = self._build_template_funds_block(ashare_evidence)
         strategy_block = self._get_strategy_markdown_block(template_language).rstrip()
 
         # 指数行情（简洁格式）
@@ -1857,7 +1888,7 @@ Today's {self._get_market_scope_name(template_language)} showed **{market_mood}*
 {sector_block or "- 暂无板块涨跌榜数据。"}
 
 ### 四、资金与情绪
-- 结合成交额和涨跌家数看，当前更适合等待确认，避免仅凭单一热点追高。
+{funds_block}
 
 ### 五、消息催化
 - 暂无可用新闻时，应降低对题材持续性的确定性判断。

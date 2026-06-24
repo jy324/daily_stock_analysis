@@ -1756,6 +1756,94 @@ Sector text.
         assert "divergence" in prompt_en.lower()
         assert "breadth drive the verdict" in prompt_en
 
+    # -- 项目3-C: A-share capital evidence wired into the template fallback (⑦) --
+
+    @staticmethod
+    def _sector_fund_flow_evidence(ma):
+        result = {
+            "capability": "sector_fund_flow",
+            "provider": "astock_data",
+            "status": "ok",
+            "data": [
+                {
+                    "sector_name": "半导体",
+                    "provider_sector_code": "BK1036",
+                    "taxonomy": "swl1",
+                    "sector_type": "industry",
+                    "main_net_inflow": {"amount": 12.3, "unit": "亿元"},
+                    "change_pct": "2.15%",
+                },
+                {
+                    "sector_name": "证券",
+                    "provider_sector_code": "BK0473",
+                    "taxonomy": "swl1",
+                    "sector_type": "industry",
+                    "main_net_inflow": {"amount": -3.1, "unit": "亿元"},
+                    "change_pct": "-0.80%",
+                },
+            ],
+            "source": {"provider": "astock_data", "status": "ok", "as_of": "2026-04-10T15:00:00", "is_partial": False},
+            "coverage": {"coverage_ratio": 1.0, "warnings": []},
+            "cache_hit": False,
+        }
+        return {"result": result, "markdown": ma._render_ashare_capital_evidence_markdown(result)}
+
+    def _cn_overview(self):
+        from src.market_analyzer import MarketOverview, MarketIndex
+
+        return MarketOverview(
+            date="2026-04-10",
+            indices=[MarketIndex(code="000001", name="上证指数", current=3300.0, change_pct=0.3)],
+            up_count=2800,
+            down_count=2000,
+            total_amount=11000.0,
+        )
+
+    def test_template_funds_section_renders_ashare_evidence_when_present(self):
+        """⑦ Template section 四 shows the sector fund-flow evidence (not boilerplate)."""
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        evidence = self._sector_fund_flow_evidence(ma)
+
+        result = ma.generate_market_review(self._cn_overview(), [], ashare_evidence=evidence)
+
+        assert "### 四、资金与情绪" in result
+        assert "半导体" in result
+        assert "主力净流入" in result
+        assert "解读：" in result
+        assert "结合成交额和涨跌家数看，当前更适合等待确认" not in result
+
+    def test_template_funds_section_keeps_boilerplate_without_evidence(self):
+        """⑦ With the feature off (no evidence), section 四 keeps the deterministic fallback."""
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+
+        result = ma.generate_market_review(self._cn_overview(), [])
+
+        assert "结合成交额和涨跌家数看，当前更适合等待确认" in result
+        assert "解读：" not in result
+
+    def test_template_funds_section_keeps_boilerplate_for_empty_evidence(self):
+        """⑦ Evidence present but with no sector rows (unavailable) falls back to boilerplate."""
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        empty_result = {
+            "capability": "sector_fund_flow",
+            "provider": "unknown",
+            "status": "unavailable",
+            "data": [],
+            "source": {"provider": "unknown", "status": "unavailable", "as_of": "", "is_partial": False},
+        }
+        evidence = {"result": empty_result, "markdown": ma._render_ashare_capital_evidence_markdown(empty_result)}
+
+        result = ma.generate_market_review(self._cn_overview(), [], ashare_evidence=evidence)
+
+        assert "结合成交额和涨跌家数看，当前更适合等待确认" in result
+
+    def test_build_ashare_capital_evidence_returns_none_when_feature_disabled(self):
+        """⑦ Gate stays closed by default: no evidence is fetched (zero behavior change)."""
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        ma.config.ashare_intelligence_enabled = False
+
+        assert ma._build_ashare_capital_evidence(self._cn_overview()) is None
+
     def test_no_private_attribute_access_in_market_analyzer_source(self):
         """Static guard: market_analyzer.py must not access private analyzer attrs."""
         import ast

@@ -1,6 +1,6 @@
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, Clipboard, FileText, Gauge, Layers, ShieldAlert, TrendingUp, WalletCards, Workflow } from 'lucide-react';
+import { BarChart3, Clipboard, Download, FileText, Gauge, Layers, Printer, ShieldAlert, TrendingUp, WalletCards, Workflow } from 'lucide-react';
 import { historyApi } from '../../api/history';
 import { formatUiText, UI_TEXT } from '../../i18n/uiText';
 import type {
@@ -11,6 +11,11 @@ import type {
   AshareCapitalEvidence,
 } from '../../types/analysis';
 import { markdownToPlainText, markdownToSummaryText, sanitizeReportMarkdown } from '../../utils/markdown';
+import {
+  downloadTextFile,
+  formatMarketReviewForExport,
+  marketReviewExportFilename,
+} from '../../utils/reportExport';
 import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
 import { getChangeColorStyle } from '../../utils/priceColor';
 import { Card } from '../common';
@@ -463,6 +468,18 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
     }
   }, [content]);
 
+  const handleDownload = useCallback(() => {
+    if (!content) {
+      return;
+    }
+    const markdown = formatMarketReviewForExport(content, marketReviewPayload, normalizedReportLanguage);
+    downloadTextFile(marketReviewExportFilename(displayTitle), markdown);
+  }, [content, marketReviewPayload, normalizedReportLanguage, displayTitle]);
+
+  const handlePrint = useCallback(() => {
+    window.print();
+  }, []);
+
   const insightCards = useMemo(() => [
     {
       icon: FileText,
@@ -517,7 +534,7 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
     : (availableTabs[0]?.id ?? 'summary');
 
   return (
-    <div className={`animate-fade-in space-y-4 pb-8 ${className}`}>
+    <div className={`animate-fade-in print-report-root space-y-4 pb-8 ${className}`}>
       <Card variant="gradient" padding="md" className="home-report-hero text-left">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
@@ -536,7 +553,7 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="no-print flex shrink-0 items-center gap-2">
             {canOpenRunFlow ? (
               <Tooltip content={runFlowText['runFlow.open']}>
                 <span className="inline-flex">
@@ -589,12 +606,37 @@ export const MarketReviewReportView: React.FC<MarketReviewReportViewProps> = ({
                 </button>
               </span>
             </Tooltip>
+            <Tooltip content={text.downloadMarkdown}>
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={isLoading || !content}
+                  className="home-surface-button flex h-10 w-10 items-center justify-center rounded-lg text-secondary-text hover:text-foreground disabled:opacity-50"
+                  aria-label={text.downloadMarkdown}
+                >
+                  <Download className="h-5 w-5" aria-hidden="true" />
+                </button>
+              </span>
+            </Tooltip>
+            <Tooltip content={text.print}>
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  onClick={handlePrint}
+                  className="home-surface-button flex h-10 w-10 items-center justify-center rounded-lg text-secondary-text hover:text-foreground"
+                  aria-label={text.print}
+                >
+                  <Printer className="h-5 w-5" aria-hidden="true" />
+                </button>
+              </span>
+            </Tooltip>
           </div>
         </div>
       </Card>
 
       {availableTabs.length > 1 ? (
-        <div className="flex flex-wrap gap-1.5 border-b border-subtle" role="tablist" aria-label="market review sections">
+        <div className="no-print flex flex-wrap gap-1.5 border-b border-subtle" role="tablist" aria-label="market review sections">
           {availableTabs.map((tab) => (
             <button
               key={tab.id}

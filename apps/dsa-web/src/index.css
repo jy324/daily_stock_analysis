@@ -3041,3 +3041,45 @@ textarea {
     text-align: left;
   }
 }
+
+/* ---- Print / Save-as-PDF: isolate the report area (#7) ---- */
+@media print {
+  body {
+    background: #fff;
+  }
+
+  /* Hide everything, then reveal only the report subtree. */
+  body * {
+    visibility: hidden;
+  }
+
+  .print-report-root,
+  .print-report-root * {
+    visibility: visible;
+  }
+
+  .print-report-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+    background: #fff;
+  }
+
+  /* Drop interactive chrome (export buttons, tab bar, run-flow actions). */
+  .no-print {
+    display: none !important;
+  }
+
+  /* Force legible dark text on the white print sheet regardless of theme;
+     inline up/down price colors (var(--home-price-*)) are preserved. */
+  .print-report-root .text-foreground,
+  .print-report-root .text-secondary-text,
+  .print-report-root .text-muted-text,
+  .print-report-root h1,
+  .print-report-root h2,
+  .print-report-root h3 {
+    color: #1a1a1a !important;
+  }
+}

@@ -6,6 +6,7 @@ import { ReportNews } from './ReportNews';
 import { ReportDetails } from './ReportDetails';
 import { ReportDiagnostics } from './ReportDiagnostics';
 import { ReportCredibility } from './ReportCredibility';
+import { ReportExportActions } from './ReportExportActions';
 import { AnalysisContextSummary } from './AnalysisContextSummary';
 import { MarketReviewReportView } from './MarketReviewReportView';
 import { normalizeReportLanguage } from '../../utils/reportLanguage';
@@ -54,7 +55,14 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
   }
 
   return (
-    <div className="home-report-stagger space-y-5 pb-8">
+    <div className="home-report-stagger print-report-root space-y-5 pb-8">
+      {/* 导出操作（下载 Markdown / 打印 PDF） */}
+      <ReportExportActions
+        report={report}
+        diagnosticStatus={diagnosticSummary?.status}
+        language={reportLanguage}
+      />
+
       {/* 概览区（首屏） */}
       <ReportOverview
         meta={meta}

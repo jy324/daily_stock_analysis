@@ -72,6 +72,13 @@ const REPORT_TEXT = {
     newsCountUnit: '条',
     partialBarNote: '日线未完成',
     disclaimer: '仅供参考，不构成投资建议',
+    downloadMarkdown: '下载 Markdown',
+    print: '打印 / 另存 PDF',
+    exportTitleSuffix: '分析报告',
+    exportGeneratedAt: '生成时间',
+    exportReportType: '报告类型',
+    exportLanguageLabel: '报告语言',
+    exportMarketReviewTitle: '大盘复盘',
   },
   en: {
     keyInsights: 'KEY INSIGHTS',
@@ -141,6 +148,13 @@ const REPORT_TEXT = {
     newsCountUnit: '',
     partialBarNote: 'Partial bar',
     disclaimer: 'For reference only, not investment advice',
+    downloadMarkdown: 'Download Markdown',
+    print: 'Print / Save PDF',
+    exportTitleSuffix: 'Analysis Report',
+    exportGeneratedAt: 'Generated',
+    exportReportType: 'Report type',
+    exportLanguageLabel: 'Language',
+    exportMarketReviewTitle: 'Market Review',
   },
 } as const;
 

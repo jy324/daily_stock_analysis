@@ -5,9 +5,10 @@ import { ReportStrategy } from './ReportStrategy';
 import { ReportNews } from './ReportNews';
 import { ReportDetails } from './ReportDetails';
 import { ReportDiagnostics } from './ReportDiagnostics';
+import { ReportCredibility } from './ReportCredibility';
 import { AnalysisContextSummary } from './AnalysisContextSummary';
 import { MarketReviewReportView } from './MarketReviewReportView';
-import { getReportText, normalizeReportLanguage } from '../../utils/reportLanguage';
+import { normalizeReportLanguage } from '../../utils/reportLanguage';
 
 interface ReportSummaryProps {
   data: AnalysisResult | AnalysisReport;
@@ -40,11 +41,6 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
 
   const { meta, summary, strategy, details } = report;
   const reportLanguage = normalizeReportLanguage(meta.reportLanguage);
-  const text = getReportText(reportLanguage);
-  const modelUsed = (meta.modelUsed || '').trim();
-  const shouldShowModel = Boolean(
-    modelUsed && !['unknown', 'error', 'none', 'null', 'n/a'].includes(modelUsed.toLowerCase()),
-  );
 
   if (meta.reportType === 'market_review') {
     return (
@@ -74,6 +70,14 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
       {/* 资讯区 */}
       <ReportNews recordId={recordId} limit={8} language={reportLanguage} />
 
+      {/* 报告可信度统一结论（透明度区顶层） */}
+      <ReportCredibility
+        meta={meta}
+        contextOverview={details?.analysisContextPackOverview}
+        diagnosticSummary={diagnosticSummary}
+        language={reportLanguage}
+      />
+
       {/* 输入数据块低敏摘要 */}
       <AnalysisContextSummary
         overview={details?.analysisContextPackOverview}
@@ -90,13 +94,6 @@ export const ReportSummary: React.FC<ReportSummaryProps> = ({
 
       {/* 透明度与追溯区 */}
       <ReportDetails details={details} recordId={recordId} language={reportLanguage} />
-
-      {/* 分析模型标记（Issue #528）— 报告末尾 */}
-      {shouldShowModel && (
-        <p className="px-1 text-xs text-muted-text">
-          {text.analysisModel}: {modelUsed}
-        </p>
-      )}
     </div>
   );
 };

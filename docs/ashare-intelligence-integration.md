@@ -91,6 +91,8 @@ DB snapshot 使用 append-only repository。逻辑槽位由 `(snapshot_type, tra
 
 开启后，市场复盘在 LLM 生成前获取一次 `sector_fund_flow` 证据，并将压缩摘要注入 prompt；结构化 payload、Markdown section 和历史快照复用同一份证据，不在 `build_market_review_payload()` 阶段再次请求 provider。payload 可追加 `ashare_intelligence.capital_evidence`，并将资金情绪拆成固定 section：`ashare_capital_evidence`（程序生成的客观数据表）和 `llm_interpretation`（LLM 对同一份证据的解释）。程序只格式化 provider 返回的金额和排名，不让 LLM 计算金额、排名或持续性；`partial`、`stale`、`empty`、`unavailable` 状态会保留在证据表中。
 
+同一份证据也会进入**模板兜底路径**：LLM 不可用或返回空响应时 `_generate_template_review` 的“资金与情绪”段在有板块资金行时渲染客观资金表并附一行解读，无证据或空结果时回退到确定性套话兜底。因此无论 LLM 路径还是兜底路径，门控关闭时该段都维持原有套话、行为不变。当前仅接入 `sector_fund_flow`，且证据渲染为中文（`zh`）；龙虎榜（`dragon_tiger_market`）与英文报告资金段为后续项。
+
 `a-stock-data/SKILL.md` 后续应收敛为薄说明层，只指导调用 `astock_data` package，不承载运行时复制或 `exec` 的网络代码。
 
 ## Live Smoke

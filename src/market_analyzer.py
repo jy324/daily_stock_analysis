@@ -745,9 +745,15 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             }
 
         if ashare_evidence:
-            payload["ashare_intelligence"] = {
+            intelligence_payload: Dict[str, Any] = {
                 "capital_evidence": ashare_evidence["result"],
             }
+            # Append the dragon-tiger evidence when present (additive; existing
+            # capital_evidence contract is unchanged).
+            dragon_evidence = ashare_evidence.get("dragon_tiger") if isinstance(ashare_evidence, dict) else None
+            if dragon_evidence is not None:
+                intelligence_payload["dragon_tiger_evidence"] = dragon_evidence
+            payload["ashare_intelligence"] = intelligence_payload
             payload["sections"] = self._with_ashare_capital_sections(
                 sections,
                 evidence_markdown=ashare_evidence["markdown"],
@@ -766,17 +772,55 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if service is None:
             return None
 
+        language = self._get_review_language()
+        # Fetch each capability independently so a flaky/missing interface on one (e.g. the
+        # optional dragon-tiger feed) never drops the other or breaks the review.
+        sector_result = self._fetch_ashare_capability(
+            service, "sector_fund_flow", overview, limit=5,
+        )
+        dragon_result = self._fetch_ashare_capability(
+            service, "dragon_tiger_market", overview, limit=10,
+        )
+
+        markdown_parts = [
+            self._render_ashare_capital_evidence_markdown(sector_result, language=language),
+        ]
+        # Only surface the dragon-tiger block when it actually returned rows, so a
+        # frequently-unavailable feed does not add noise to every report.
+        if self._ashare_evidence_rows(self._result_value(dragon_result, "data", None)):
+            markdown_parts.append(
+                self._render_ashare_dragon_tiger_markdown(dragon_result, language=language)
+            )
+
+        return {
+            "result": sector_result,
+            "dragon_tiger": dragon_result,
+            "markdown": "\n\n".join(part for part in markdown_parts if part).strip(),
+        }
+
+    def _fetch_ashare_capability(
+        self,
+        service: Any,
+        capability: str,
+        overview: MarketOverview,
+        **params: Any,
+    ) -> Dict[str, Any]:
+        """Fetch one A-share capability, returning a JSON-able result dict.
+
+        On any provider error returns a deterministic ``unavailable`` result so the
+        caller degrades gracefully (per-capability isolation)."""
         try:
             result = service.get_capability(
-                "sector_fund_flow",
+                capability,
                 trade_date=overview.date,
                 as_of_bucket=f"{overview.date}-market-review",
-                limit=5,
+                **params,
             )
+            return result.model_dump(mode="json") if hasattr(result, "model_dump") else result
         except Exception as exc:
-            logger.warning("A 股情报资金证据获取失败，市场复盘继续: %s", exc)
-            result = {
-                "capability": "sector_fund_flow",
+            logger.warning("A 股情报 %s 获取失败，市场复盘继续: %s", capability, exc)
+            return {
+                "capability": capability,
                 "provider": "unknown",
                 "status": "unavailable",
                 "data": [],
@@ -793,19 +837,6 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
                 },
                 "cache_hit": False,
             }
-            return {
-                "result": result,
-                "markdown": self._render_ashare_capital_evidence_markdown(
-                    result, language=self._get_review_language()
-                ),
-            }
-
-        return {
-            "result": result.model_dump(mode="json") if hasattr(result, "model_dump") else result,
-            "markdown": self._render_ashare_capital_evidence_markdown(
-                result, language=self._get_review_language()
-            ),
-        }
 
     def _with_ashare_capital_sections(
         self,
@@ -893,6 +924,62 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             )
         return "\n".join(lines).strip()
 
+    def _render_ashare_dragon_tiger_markdown(self, result: Any, language: str = "zh") -> str:
+        """Render the market-level dragon-tiger (龙虎榜) evidence as a Markdown block.
+
+        Field extraction is defensive (multi-key + N/A) because row shape comes straight
+        from the provider; only headers/labels are localized."""
+        language = normalize_report_language(language)
+        status = str(self._result_value(result, "status", "unavailable"))
+        source = self._result_value(result, "source", None)
+        provider = str(self._source_value(source, "provider", self._result_value(result, "provider", "unknown")))
+        as_of = str(self._source_value(source, "as_of", ""))
+        rows = self._ashare_evidence_rows(self._result_value(result, "data", None))
+
+        if language == "en":
+            title = "#### Dragon-Tiger Board (market)"
+            status_line = f"- Status: `{status}`; source: `{provider}`; as-of: {as_of or 'N/A'}"
+            empty_line = "- Valid empty result: no displayable dragon-tiger records were returned."
+            header = "| Name | Code | Net buy | Buy | Sell | Change | Reason |"
+        else:
+            title = "#### 龙虎榜（全市场）"
+            status_line = f"- 数据状态：`{status}`；来源：`{provider}`；截至：{as_of or 'N/A'}"
+            empty_line = "- 合法空结果：当前未返回可展示的龙虎榜记录。"
+            header = "| 名称 | 代码 | 净买入 | 买入 | 卖出 | 涨跌幅 | 上榜原因 |"
+
+        lines = [title, status_line, ""]
+        if not rows:
+            lines.append(empty_line)
+            return "\n".join(lines).strip()
+
+        lines.extend([header, "| --- | --- | --- | --- | --- | --- | --- |"])
+        for row in rows[:5]:
+            lines.append(
+                "| {name} | {code} | {net} | {buy} | {sell} | {chg} | {reason} |".format(
+                    name=self._ashare_cell(row.get("name") or row.get("stock_name") or row.get("sec_name")),
+                    code=self._ashare_cell(
+                        row.get("code") or row.get("stock_code") or row.get("security_code")
+                    ),
+                    net=self._ashare_money_cell(
+                        row.get("net_buy")
+                        or row.get("net_amount")
+                        or row.get("net_buy_amount")
+                        or row.get("lhb_net_buy")
+                    ),
+                    buy=self._ashare_money_cell(
+                        row.get("buy_amount") or row.get("buy") or row.get("lhb_buy")
+                    ),
+                    sell=self._ashare_money_cell(
+                        row.get("sell_amount") or row.get("sell") or row.get("lhb_sell")
+                    ),
+                    chg=self._ashare_cell(row.get("change_pct") or row.get("change_percent")),
+                    reason=self._ashare_cell(
+                        row.get("reason") or row.get("explanation") or row.get("上榜原因")
+                    ),
+                )
+            )
+        return "\n".join(lines).strip()
+
     def _build_template_funds_block(
         self,
         ashare_evidence: Optional[Dict[str, Any]],
@@ -924,8 +1011,9 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         if not isinstance(ashare_evidence, dict):
             return fallback
         markdown = str(ashare_evidence.get("markdown") or "").strip()
-        rows = self._ashare_evidence_rows(self._result_value(ashare_evidence.get("result"), "data", None))
-        if not markdown or not rows:
+        sector_rows = self._ashare_evidence_rows(self._result_value(ashare_evidence.get("result"), "data", None))
+        dragon_rows = self._ashare_evidence_rows(self._result_value(ashare_evidence.get("dragon_tiger"), "data", None))
+        if not markdown or (not sector_rows and not dragon_rows):
             return fallback
         return f"{markdown}\n{interpretation}"
 
@@ -1802,6 +1890,7 @@ Output the report content directly, no extra commentary.
                     )
             else:
                 lines.append("- No displayable sector-flow rows were returned.")
+            self._append_dragon_tiger_prompt_lines(lines, ashare_evidence, language="en")
             return "\n".join(lines)
 
         lines = [
@@ -1824,7 +1913,32 @@ Output the report content directly, no extra commentary.
                 )
         else:
             lines.append("- 未返回可展示的板块资金记录。")
+        self._append_dragon_tiger_prompt_lines(lines, ashare_evidence, language="zh")
         return "\n".join(lines)
+
+    def _append_dragon_tiger_prompt_lines(
+        self,
+        lines: List[str],
+        ashare_evidence: Optional[Dict[str, Any]],
+        *,
+        language: str,
+    ) -> None:
+        """Append a compact dragon-tiger summary to the prompt evidence block when present."""
+        dragon_result = ashare_evidence.get("dragon_tiger") if isinstance(ashare_evidence, dict) else None
+        dragon_rows = self._ashare_evidence_rows(self._result_value(dragon_result, "data", None))
+        if not dragon_rows:
+            return
+        lines.append("- Dragon-tiger (market) top rows:" if language == "en" else "- 龙虎榜（全市场）摘要：")
+        for row in dragon_rows[:5]:
+            name = self._ashare_cell(row.get("name") or row.get("stock_name") or row.get("sec_name"))
+            net = self._ashare_money_cell(
+                row.get("net_buy") or row.get("net_amount") or row.get("net_buy_amount") or row.get("lhb_net_buy")
+            )
+            reason = self._ashare_cell(row.get("reason") or row.get("explanation") or row.get("上榜原因"))
+            if language == "en":
+                lines.append(f"  - {name}: net_buy={net}, reason={reason}")
+            else:
+                lines.append(f"  - {name}: 净买入={net}, 上榜原因={reason}")
     
     def _generate_template_review(
         self,

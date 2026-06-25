@@ -940,12 +940,12 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             title = "#### Dragon-Tiger Board (market)"
             status_line = f"- Status: `{status}`; source: `{provider}`; as-of: {as_of or 'N/A'}"
             empty_line = "- Valid empty result: no displayable dragon-tiger records were returned."
-            header = "| Name | Code | Net buy | Buy | Sell | Change | Reason |"
+            header = "| Name | Code | Net buy (100M) | Buy (100M) | Sell (100M) | Change | Reason |"
         else:
             title = "#### 龙虎榜（全市场）"
             status_line = f"- 数据状态：`{status}`；来源：`{provider}`；截至：{as_of or 'N/A'}"
             empty_line = "- 合法空结果：当前未返回可展示的龙虎榜记录。"
-            header = "| 名称 | 代码 | 净买入 | 买入 | 卖出 | 涨跌幅 | 上榜原因 |"
+            header = "| 名称 | 代码 | 净买入(亿) | 买入(亿) | 卖出(亿) | 涨跌幅 | 上榜原因 |"
 
         lines = [title, status_line, ""]
         if not rows:
@@ -954,31 +954,54 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
 
         lines.extend([header, "| --- | --- | --- | --- | --- | --- | --- |"])
         for row in rows[:5]:
+            change_value = row.get("change_pct")
+            if change_value is None:
+                change_value = row.get("change_percent")
             lines.append(
                 "| {name} | {code} | {net} | {buy} | {sell} | {chg} | {reason} |".format(
                     name=self._ashare_cell(row.get("name") or row.get("stock_name") or row.get("sec_name")),
                     code=self._ashare_cell(
                         row.get("code") or row.get("stock_code") or row.get("security_code")
                     ),
-                    net=self._ashare_money_cell(
-                        row.get("net_buy")
-                        or row.get("net_amount")
-                        or row.get("net_buy_amount")
-                        or row.get("lhb_net_buy")
+                    net=self._ashare_wan_amount_cell(
+                        row, "net_buy_wan",
+                        fallback_keys=("net_buy", "net_amount", "net_buy_amount", "lhb_net_buy"),
                     ),
-                    buy=self._ashare_money_cell(
-                        row.get("buy_amount") or row.get("buy") or row.get("lhb_buy")
+                    buy=self._ashare_wan_amount_cell(
+                        row, "buy_wan", fallback_keys=("buy_amount", "buy", "lhb_buy"),
                     ),
-                    sell=self._ashare_money_cell(
-                        row.get("sell_amount") or row.get("sell") or row.get("lhb_sell")
+                    sell=self._ashare_wan_amount_cell(
+                        row, "sell_wan", fallback_keys=("sell_amount", "sell", "lhb_sell"),
                     ),
-                    chg=self._ashare_cell(row.get("change_pct") or row.get("change_percent")),
+                    chg=self._format_signed_pct(change_value),
                     reason=self._ashare_cell(
                         row.get("reason") or row.get("explanation") or row.get("上榜原因")
                     ),
                 )
             )
         return "\n".join(lines).strip()
+
+    def _ashare_wan_amount_cell(
+        self,
+        row: Dict[str, Any],
+        *wan_keys: str,
+        fallback_keys: tuple = (),
+    ) -> str:
+        """Format a dragon-tiger money cell, converting provider ``*_wan`` (万元) values to
+        亿 (divide by 1e4). Falls back to dict/scalar money keys, then N/A."""
+        for key in wan_keys:
+            value = row.get(key)
+            if value in (None, "", "-"):
+                continue
+            try:
+                return f"{float(value) / 1e4:.2f}"
+            except (TypeError, ValueError):
+                return self._ashare_cell(value)
+        for key in fallback_keys:
+            value = row.get(key)
+            if value not in (None, "", "-"):
+                return self._ashare_money_cell(value)
+        return "N/A"
 
     def _build_template_funds_block(
         self,
@@ -1931,14 +1954,15 @@ Output the report content directly, no extra commentary.
         lines.append("- Dragon-tiger (market) top rows:" if language == "en" else "- 龙虎榜（全市场）摘要：")
         for row in dragon_rows[:5]:
             name = self._ashare_cell(row.get("name") or row.get("stock_name") or row.get("sec_name"))
-            net = self._ashare_money_cell(
-                row.get("net_buy") or row.get("net_amount") or row.get("net_buy_amount") or row.get("lhb_net_buy")
+            net = self._ashare_wan_amount_cell(
+                row, "net_buy_wan",
+                fallback_keys=("net_buy", "net_amount", "net_buy_amount", "lhb_net_buy"),
             )
             reason = self._ashare_cell(row.get("reason") or row.get("explanation") or row.get("上榜原因"))
             if language == "en":
-                lines.append(f"  - {name}: net_buy={net}, reason={reason}")
+                lines.append(f"  - {name}: net_buy(100M)={net}, reason={reason}")
             else:
-                lines.append(f"  - {name}: 净买入={net}, 上榜原因={reason}")
+                lines.append(f"  - {name}: 净买入(亿)={net}, 上榜原因={reason}")
     
     def _generate_template_review(
         self,

@@ -1895,14 +1895,15 @@ Sector text.
 
     @staticmethod
     def _dragon_tiger_result(rows: bool = True):
+        # Field names mirror the real astock_data provider rows (money in 万元 via *_wan).
         data = [
             {
                 "name": "贵州茅台",
                 "code": "600519",
-                "net_buy": {"amount": 1.2, "unit": "亿元"},
-                "buy_amount": {"amount": 3.0, "unit": "亿元"},
-                "sell_amount": {"amount": 1.8, "unit": "亿元"},
-                "change_pct": "3.10%",
+                "net_buy_wan": 411174.42,
+                "buy_wan": 629938.66,
+                "sell_wan": 218764.24,
+                "change_pct": 3.10,
                 "reason": "日涨幅偏离值达7%",
             }
         ] if rows else []
@@ -1929,10 +1930,13 @@ Sector text.
         en = ma._render_ashare_dragon_tiger_markdown(result, "en")
         empty = ma._render_ashare_dragon_tiger_markdown(self._dragon_tiger_result(rows=False))
 
-        assert "龙虎榜（全市场）" in zh and "净买入" in zh and "贵州茅台" in zh
-        assert "Dragon-Tiger Board" in en and "Net buy" in en and "贵州茅台" in en
+        assert "龙虎榜（全市场）" in zh and "净买入(亿)" in zh and "贵州茅台" in zh
+        assert "Dragon-Tiger Board" in en and "Net buy (100M)" in en and "贵州茅台" in en
         assert "净买入" not in en
         assert "合法空结果" in empty
+        # 411174.42 万元 -> 41.12 亿 (provider *_wan field converted)
+        assert "41.12" in zh and "41.12" in en
+        assert "+3.10%" in zh  # change rendered as signed percent
 
     def test_build_evidence_combines_sector_and_dragon_tiger(self):
         from unittest.mock import patch

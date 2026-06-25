@@ -99,6 +99,8 @@ uvicorn server:app --reload --host 0.0.0.0 --port 8000
 
 ```bash
 pip install -r requirements.txt
+# 可选：A 股情报特性（gated，默认关闭）需额外安装 astock-data；不装则功能优雅降级
+pip install -r requirements-ashare.txt
 pip install flake8 pytest
 ./scripts/ci_gate.sh
 python -m pytest -m "not network"

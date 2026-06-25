@@ -1,0 +1,11 @@
+# Optional A-share intelligence dependency.
+#
+# astock-data is an optional, self-maintained facade (https://github.com/jy324/a-stock-data)
+# that powers the *gated* A-share market-review capital / dragon-tiger evidence. It is NOT
+# required for the core app: when it is absent the feature gate degrades gracefully and the
+# review proceeds without A-share evidence.
+#
+# Install it explicitly only when you intend to enable the feature:
+#   pip install -r requirements.txt -r requirements-ashare.txt
+#   # then set ASHARE_INTELLIGENCE_ENABLED=true (yaml report.enabled is already true)
+git+https://github.com/jy324/a-stock-data.git@991185a569bac2410f5db69159d5550b7e0edf3f#egg=astock-data

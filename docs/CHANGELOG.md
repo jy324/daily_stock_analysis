@@ -66,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [新功能] 个股分析报告与大盘复盘支持完整导出：下载含元数据头（模型/时间/可信度/免责）的 Markdown，以及浏览器打印 / 另存为 PDF（仅打印报告区、无新依赖）。
 - [改进] 大盘复盘模板兜底“资金与情绪”段在 A 股情报启用且有板块资金行时呈现资金流证据并附解读；特性门控默认关闭、关闭时维持原套话兜底、行为不变。
 - [改进] 大盘复盘成交额描述接入近 N 日历史基准：编排层从已持久化的复盘 payload 读取近 20 个交易日两市成交额均值并注入分析器，足够样本时按基准给出“放量/缩量/与近期持平”，样本不足（<5）或读取失败时回退到“绝对口径”，不改变报告契约。
+- [改进] A 股资金证据与模板“资金与情绪”段英文本地化：证据表/状态行支持中英双语，英文复盘模板新增常驻 Fund Flows 段；中文输出不变。
+- [新功能] A 股资金情报新增市场级龙虎榜（dragon_tiger_market）证据：与板块资金流各自独立抓取与降级（任一接口失败仅省略该段、不中断复盘），双语渲染并接入模板/Prompt/payload（payload 追加 dragon_tiger_evidence，不改既有 capital_evidence 契约）。
+- [改进] astock-data 改为真·可选依赖：从 requirements.txt 移至 requirements-ashare.txt（默认 pip 安装与 CI base 不再拉取，缺失时优雅降级）；live-smoke 显式安装该可选包；yaml report 子开关默认置 true（仅当 ASHARE_INTELLIGENCE_ENABLED=true 时生效，故默认部署行为不变，启用只需一个 env）。
 
 ## [3.21.0] - 2026-06-07
 

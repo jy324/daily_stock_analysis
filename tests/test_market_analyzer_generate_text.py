@@ -1891,6 +1891,125 @@ Sector text.
         assert "wait for confirmation" in report
         assert "Read:" not in report
 
+    # -- PR2: market dragon-tiger (龙虎榜) evidence (bilingual + per-capability degradation) --
+
+    @staticmethod
+    def _dragon_tiger_result(rows: bool = True):
+        data = [
+            {
+                "name": "贵州茅台",
+                "code": "600519",
+                "net_buy": {"amount": 1.2, "unit": "亿元"},
+                "buy_amount": {"amount": 3.0, "unit": "亿元"},
+                "sell_amount": {"amount": 1.8, "unit": "亿元"},
+                "change_pct": "3.10%",
+                "reason": "日涨幅偏离值达7%",
+            }
+        ] if rows else []
+        return {
+            "capability": "dragon_tiger_market",
+            "provider": "astock_data",
+            "status": "ok" if rows else "unavailable",
+            "data": data,
+            "source": {
+                "provider": "astock_data",
+                "status": "ok" if rows else "unavailable",
+                "as_of": "2026-04-10T15:30:00",
+                "is_partial": False,
+            },
+            "coverage": {"coverage_ratio": 1.0 if rows else 0.0},
+            "cache_hit": False,
+        }
+
+    def test_render_dragon_tiger_markdown_bilingual(self):
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        result = self._dragon_tiger_result()
+
+        zh = ma._render_ashare_dragon_tiger_markdown(result)
+        en = ma._render_ashare_dragon_tiger_markdown(result, "en")
+        empty = ma._render_ashare_dragon_tiger_markdown(self._dragon_tiger_result(rows=False))
+
+        assert "龙虎榜（全市场）" in zh and "净买入" in zh and "贵州茅台" in zh
+        assert "Dragon-Tiger Board" in en and "Net buy" in en and "贵州茅台" in en
+        assert "净买入" not in en
+        assert "合法空结果" in empty
+
+    def test_build_evidence_combines_sector_and_dragon_tiger(self):
+        from unittest.mock import patch
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        sector = self._sector_fund_flow_evidence(ma)["result"]
+        dragon = self._dragon_tiger_result()
+        fake = MagicMock()
+        fake.get_capability.side_effect = (
+            lambda capability, **kw: sector if capability == "sector_fund_flow" else dragon
+        )
+        ma.intelligence_service = fake
+
+        with patch(
+            "src.services.ashare_intelligence_service.is_ashare_feature_section_enabled",
+            return_value=True,
+        ):
+            evidence = ma._build_ashare_capital_evidence(self._cn_overview())
+
+        assert evidence["result"] == sector
+        assert evidence["dragon_tiger"] == dragon
+        assert "主力净流入" in evidence["markdown"]
+        assert "龙虎榜（全市场）" in evidence["markdown"]
+
+    def test_build_evidence_degrades_when_dragon_tiger_fails(self):
+        from unittest.mock import patch
+
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        sector = self._sector_fund_flow_evidence(ma)["result"]
+
+        def _side(capability, **kw):
+            if capability == "sector_fund_flow":
+                return sector
+            raise RuntimeError("dragon-tiger provider down")
+
+        fake = MagicMock()
+        fake.get_capability.side_effect = _side
+        ma.intelligence_service = fake
+
+        with patch(
+            "src.services.ashare_intelligence_service.is_ashare_feature_section_enabled",
+            return_value=True,
+        ):
+            evidence = ma._build_ashare_capital_evidence(self._cn_overview())
+
+        assert "主力净流入" in evidence["markdown"]  # sector still rendered
+        assert "龙虎榜" not in evidence["markdown"]  # failing dragon-tiger omitted, no noise
+        assert evidence["dragon_tiger"]["status"] == "unavailable"
+
+    def test_template_funds_block_shows_when_only_dragon_tiger_has_rows(self):
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        dragon = self._dragon_tiger_result()
+        empty_sector = {"status": "unavailable", "data": [], "source": {"provider": "unknown"}}
+        evidence = {
+            "result": empty_sector,
+            "dragon_tiger": dragon,
+            "markdown": ma._render_ashare_dragon_tiger_markdown(dragon),
+        }
+
+        block = ma._build_template_funds_block(evidence)
+
+        assert "龙虎榜（全市场）" in block
+        assert "解读：" in block
+
+    def test_payload_includes_dragon_tiger_evidence_additively(self):
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        sector = self._sector_fund_flow_evidence(ma)["result"]
+        dragon = self._dragon_tiger_result()
+        evidence = {"result": sector, "dragon_tiger": dragon, "markdown": "- 数据状态"}
+
+        payload = ma.build_market_review_payload(
+            self._cn_overview(), [], "## 2026-04-10 大盘复盘", {"dimensions": {}}, ashare_evidence=evidence,
+        )
+
+        assert payload["ashare_intelligence"]["capital_evidence"] == sector
+        assert payload["ashare_intelligence"]["dragon_tiger_evidence"] == dragon
+
     def test_no_private_attribute_access_in_market_analyzer_source(self):
         """Static guard: market_analyzer.py must not access private analyzer attrs."""
         import ast

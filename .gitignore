@@ -86,3 +86,11 @@ static/
 /apps/dsa-desktop/dist/
 /apps/dsa-desktop/node_modules/
 docs/specs/
+
+# 本地运行产物：日志、UI 评审截图、根级误生成 lockfile（勿入库；
+# apps/* 下的 package-lock.json 仍纳入版本控制，故仅锚定仓库根）
+*.log
+/.ui-review/
+/.api.log
+/.backend-setup.log
+/package-lock.json

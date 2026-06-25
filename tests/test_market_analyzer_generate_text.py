@@ -1844,6 +1844,53 @@ Sector text.
 
         assert ma._build_ashare_capital_evidence(self._cn_overview()) is None
 
+    # -- PR1: A-share capital evidence / template funds section English localization --
+
+    def test_render_ashare_evidence_markdown_localizes_to_english(self):
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        result = self._sector_fund_flow_evidence(ma)["result"]
+
+        zh = ma._render_ashare_capital_evidence_markdown(result)
+        en = ma._render_ashare_capital_evidence_markdown(result, "en")
+
+        assert "数据状态" in zh and "主力净流入" in zh
+        assert "Status:" in en and "Main net inflow" in en and "Sector |" in en
+        assert "数据状态" not in en
+        assert "半导体" in en  # row values stay as provided by the provider
+
+    def test_render_ashare_evidence_markdown_english_empty_result(self):
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        empty = {"status": "unavailable", "data": [], "source": {"provider": "unknown"}}
+
+        en = ma._render_ashare_capital_evidence_markdown(empty, "en")
+
+        assert "Valid empty result" in en
+        assert "合法空结果" not in en
+
+    def test_en_template_includes_localized_fund_flows_section(self):
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        ma.config.report_language = "en"
+        result = self._sector_fund_flow_evidence(ma)["result"]
+        evidence = {"result": result, "markdown": ma._render_ashare_capital_evidence_markdown(result, "en")}
+
+        report = ma.generate_market_review(self._cn_overview(), [], ashare_evidence=evidence)
+
+        assert "### Fund Flows" in report
+        assert "Main net inflow" in report
+        assert "半导体" in report
+        assert "Read:" in report
+        assert "数据状态" not in report
+
+    def test_en_template_fund_flows_falls_back_without_evidence(self):
+        ma = self._make_market_analyzer_with_mock_generate_text(return_value=None)
+        ma.config.report_language = "en"
+
+        report = ma.generate_market_review(self._cn_overview(), [])
+
+        assert "### Fund Flows" in report
+        assert "wait for confirmation" in report
+        assert "Read:" not in report
+
     def test_no_private_attribute_access_in_market_analyzer_source(self):
         """Static guard: market_analyzer.py must not access private analyzer attrs."""
         import ast

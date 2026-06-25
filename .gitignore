@@ -94,3 +94,5 @@ docs/specs/
 /.api.log
 /.backend-setup.log
 /package-lock.json
+# uv 本地锁文件：仓库以 requirements.txt 为准，uv.lock 为本地环境产物
+/uv.lock

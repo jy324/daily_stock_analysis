@@ -17,6 +17,16 @@ A 股情报扩展默认关闭，DSA 应用层仅暴露能力探测和运行时�
 
 报告、Agent tools、评分、TTL、预算和后续细项放在 `config/ashare_intelligence.yaml`，避免一次性膨胀 `.env`。评分需要 `.env` 顶层开关和 YAML `scoring.enabled` 同时开启才会对外显示可用。
 
+`astock-data` 是**可选依赖**：不在主 `requirements.txt`，而在 `requirements-ashare.txt`。默认 `pip install -r requirements.txt`（含 CI base）不安装它，缺失时特性门控优雅降级、复盘照常。启用方式：
+
+```bash
+pip install -r requirements.txt -r requirements-ashare.txt
+# 顶层 env 开关默认 false；设为 true 即启用（yaml report.enabled 已默认 true，无需改 yaml）
+export ASHARE_INTELLIGENCE_ENABLED=true
+```
+
+`config/ashare_intelligence.yaml` 的 `report.enabled` 默认 `true`，但**仅当顶层 `ASHARE_INTELLIGENCE_ENABLED=true` 时才真正生效**，故默认部署行为不变。
+
 ## API 语义
 
 `GET /api/v1/capabilities` 是轻量能力探测端点，不触发 provider 请求。返回：
@@ -91,7 +101,14 @@ DB snapshot 使用 append-only repository。逻辑槽位由 `(snapshot_type, tra
 
 开启后，市场复盘在 LLM 生成前获取一次 `sector_fund_flow` 证据，并将压缩摘要注入 prompt；结构化 payload、Markdown section 和历史快照复用同一份证据，不在 `build_market_review_payload()` 阶段再次请求 provider。payload 可追加 `ashare_intelligence.capital_evidence`，并将资金情绪拆成固定 section：`ashare_capital_evidence`（程序生成的客观数据表）和 `llm_interpretation`（LLM 对同一份证据的解释）。程序只格式化 provider 返回的金额和排名，不让 LLM 计算金额、排名或持续性；`partial`、`stale`、`empty`、`unavailable` 状态会保留在证据表中。
 
-同一份证据也会进入**模板兜底路径**：LLM 不可用或返回空响应时 `_generate_template_review` 的“资金与情绪”段在有板块资金行时渲染客观资金表并附一行解读，无证据或空结果时回退到确定性套话兜底。因此无论 LLM 路径还是兜底路径，门控关闭时该段都维持原有套话、行为不变。当前仅接入 `sector_fund_flow`，且证据渲染为中文（`zh`）；龙虎榜（`dragon_tiger_market`）与英文报告资金段为后续项。
+同一份证据也会进入**模板兜底路径**：LLM 不可用或返回空响应时 `_generate_template_review` 的“资金与情绪”段（英文模板为常驻 `Fund Flows` 段）在有数据行时渲染客观证据表并附一行解读，无证据或空结果时回退到确定性套话兜底。因此无论 LLM 路径还是兜底路径，门控关闭时该段都维持原有套话、行为不变。
+
+开启后实际抓取两类证据，**各自独立抓取与降级**（`_fetch_ashare_capability` 各自 try/except，任一接口失败仅省略该段、不影响另一类，也不中断复盘——契合 astock-data 作为可选/可能不稳定 provider 的定位）：
+
+- `sector_fund_flow`：板块资金流 top5（始终渲染状态行）。
+- `dragon_tiger_market`：市场级龙虎榜 top（**仅在有行时**并入 markdown，避免可用性差时产生噪声）。
+
+证据表与状态行**支持中英双语**（按报告语言渲染，仅本地化表头/标签，行值按 provider 原样输出）。payload 在 `ashare_intelligence` 下同时给出 `capital_evidence`（板块资金，契约不变）与**追加**的 `dragon_tiger_evidence`。
 
 `a-stock-data/SKILL.md` 后续应收敛为薄说明层，只指导调用 `astock_data` package，不承载运行时复制或 `exec` 的网络代码。
 

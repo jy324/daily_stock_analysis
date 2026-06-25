@@ -5,8 +5,10 @@
 
 schema_version: v1
 
+# report 子开关默认开启：仅当顶层 ASHARE_INTELLIGENCE_ENABLED=true 时才真正生效，
+# 故默认部署（未装 astock-data / 未设 env）行为不变。设单个 env 即可启用，无需改本文件。
 report:
-  enabled: false
+  enabled: true
 
 agent_tools:
   enabled: false

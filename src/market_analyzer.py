@@ -795,12 +795,16 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             }
             return {
                 "result": result,
-                "markdown": self._render_ashare_capital_evidence_markdown(result),
+                "markdown": self._render_ashare_capital_evidence_markdown(
+                    result, language=self._get_review_language()
+                ),
             }
 
         return {
             "result": result.model_dump(mode="json") if hasattr(result, "model_dump") else result,
-            "markdown": self._render_ashare_capital_evidence_markdown(result),
+            "markdown": self._render_ashare_capital_evidence_markdown(
+                result, language=self._get_review_language()
+            ),
         }
 
     def _with_ashare_capital_sections(
@@ -842,7 +846,8 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         key = str(section.get("key") or "")
         return key in {"四_资金与情绪", "3_fund_flows"}
 
-    def _render_ashare_capital_evidence_markdown(self, result: Any) -> str:
+    def _render_ashare_capital_evidence_markdown(self, result: Any, language: str = "zh") -> str:
+        language = normalize_report_language(language)
         status = str(self._result_value(result, "status", "unavailable"))
         source = self._result_value(result, "source", None)
         provider = str(self._source_value(source, "provider", self._result_value(result, "provider", "unknown")))
@@ -850,18 +855,27 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
         is_partial = bool(self._source_value(source, "is_partial", False))
         rows = self._ashare_evidence_rows(self._result_value(result, "data", None))
 
-        lines = [
-            f"- 数据状态：`{status}`；来源：`{provider}`；截至：{as_of or 'N/A'}；盘中：{'是' if is_partial else '否'}",
-            "",
-        ]
+        if language == "en":
+            status_line = (
+                f"- Status: `{status}`; source: `{provider}`; as-of: {as_of or 'N/A'}; "
+                f"intraday: {'yes' if is_partial else 'no'}"
+            )
+            empty_line = "- Valid empty result: no displayable sector capital-flow records were returned."
+            header = "| Sector | provider_sector_code | taxonomy | sector_type | Main net inflow | Change |"
+        else:
+            status_line = (
+                f"- 数据状态：`{status}`；来源：`{provider}`；截至：{as_of or 'N/A'}；"
+                f"盘中：{'是' if is_partial else '否'}"
+            )
+            empty_line = "- 合法空结果：当前未返回可展示的板块资金记录。"
+            header = "| 板块 | provider_sector_code | taxonomy | sector_type | 主力净流入 | 涨跌幅 |"
+
+        lines = [status_line, ""]
         if not rows:
-            lines.append("- 合法空结果：当前未返回可展示的板块资金记录。")
+            lines.append(empty_line)
             return "\n".join(lines).strip()
 
-        lines.extend([
-            "| 板块 | provider_sector_code | taxonomy | sector_type | 主力净流入 | 涨跌幅 |",
-            "| --- | --- | --- | --- | --- | --- |",
-        ])
+        lines.extend([header, "| --- | --- | --- | --- | --- | --- |"])
         for row in rows[:5]:
             lines.append(
                 "| {name} | {code} | {taxonomy} | {sector_type} | {net} | {change_pct} |".format(
@@ -879,24 +893,40 @@ Focus on index trend, liquidity, and sector rotation to shape the next-session t
             )
         return "\n".join(lines).strip()
 
-    def _build_template_funds_block(self, ashare_evidence: Optional[Dict[str, Any]]) -> str:
+    def _build_template_funds_block(
+        self,
+        ashare_evidence: Optional[Dict[str, Any]],
+        language: str = "zh",
+    ) -> str:
         """Section 四「资金与情绪」body for the template fallback.
 
         When A-share capital intelligence is enabled and returns sector rows, render
         the objective fund-flow evidence plus a one-line read; otherwise keep the
         deterministic boilerplate so a disabled/empty feature changes nothing.
+        The evidence ``markdown`` is already localized by the evidence builder.
         """
-        fallback = "- 结合成交额和涨跌家数看，当前更适合等待确认，避免仅凭单一热点追高。"
+        language = normalize_report_language(language)
+        if language == "en":
+            fallback = (
+                "- Without fresh capital-flow intelligence, weigh turnover and breadth and "
+                "wait for confirmation rather than chasing a single hot theme."
+            )
+            interpretation = (
+                "- Read: combine the sector capital flows above with turnover and breadth; "
+                "watch whether main-force net inflow persists, and avoid chasing a single hot theme."
+            )
+        else:
+            fallback = "- 结合成交额和涨跌家数看，当前更适合等待确认，避免仅凭单一热点追高。"
+            interpretation = (
+                "- 解读：结合上述板块资金流向与成交额、涨跌家数，关注主力净流入方向的持续性，"
+                "避免仅凭单一热点追高。"
+            )
         if not isinstance(ashare_evidence, dict):
             return fallback
         markdown = str(ashare_evidence.get("markdown") or "").strip()
         rows = self._ashare_evidence_rows(self._result_value(ashare_evidence.get("result"), "data", None))
         if not markdown or not rows:
             return fallback
-        interpretation = (
-            "- 解读：结合上述板块资金流向与成交额、涨跌家数，关注主力净流入方向的持续性，"
-            "避免仅凭单一热点追高。"
-        )
         return f"{markdown}\n{interpretation}"
 
     @staticmethod
@@ -1812,7 +1842,7 @@ Output the report content directly, no extra commentary.
         action_stance = self._build_action_stance(overview, template_language)
         risk_focus = self._build_risk_focus(overview, template_language)
         # 资金与情绪：启用 A 股资金情报且有数据时呈现板块资金流证据，否则维持兜底套话。
-        funds_block = self._build_template_funds_block(ashare_evidence)
+        funds_block = self._build_template_funds_block(ashare_evidence, template_language)
         strategy_block = self._get_strategy_markdown_block(template_language).rstrip()
 
         # 指数行情（简洁格式）
@@ -1857,6 +1887,9 @@ Today's {self._get_market_scope_name(template_language)} showed **{market_mood}*
 {indices_text or "- No index data available"}
 {stats_section}
 {sector_section}
+### Fund Flows
+{funds_block}
+
 ### 5. Risk Alerts
 - {risk_focus}
 - Market conditions can change quickly. The data above is for reference only and does not constitute investment advice.
